@@ -1,3 +1,7 @@
 *.o
 *.swp
 fm_transmitter
+GTAGS
+GRTAGS
+GPATH
+*~
