@@ -52,7 +52,7 @@ class Transmitter
         void play(string filename, double frequency, bool loop);
         void stop();
 
-	static Transmitter* getInstance(); 
+	static Transmitter* getInstance();
         static AudioFormat* getFormat(string filename);
     private:
         Transmitter();

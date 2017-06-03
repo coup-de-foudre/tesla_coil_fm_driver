@@ -34,6 +34,7 @@
 #include "transmitter.h"
 #include "wave_reader.h"
 #include "stdin_reader.h"
+#include <iostream>
 #include <sstream>
 #include <cmath>
 #include <string.h>
@@ -42,9 +43,21 @@
 
 using std::ostringstream;
 
+// Let's define PERIPHERAL_BASE 0x3F000000
+
+// GPIO Function Select 0 GPFSEL0
+// GPFSEL0 = PERIPHERAL_BASE + GPIO_BASE
 #define GPIO_BASE 0x00200000
+
+// Clock Manager General Purpose Clocks Control CM_GP0CTL
 #define CLK0_BASE 0x00101070
+
+/// Clock Manager General Purpose Clock Divisors CM_GP0DIV
 #define CLK0DIV_BASE 0x00101074
+
+// The ST system timer which provides a 64-bit system counter
+//   CLO 32-bit lower part of the counter at register 0x7E003004 (virtual)
+//   CHI 32-bit upper part of the counter at register 0x7E003008 (virtual)
 #define TCNT_BASE 0x00003004
 
 #define STDIN_READ_DELAY 700000
@@ -64,11 +77,11 @@ Transmitter::Transmitter()
 
     FILE* pipe = popen("uname -m", "r");
     if (pipe) {
-        char buffer[64];
+        char inputBuffer[64];
         string machine = "";
         while (!feof(pipe)) {
-            if (fgets(buffer, 64, pipe)) {
-                machine += buffer;
+            if (fgets(inputBuffer, 64, pipe)) {
+                machine += inputBuffer;
             }
         }
         pclose(pipe);
@@ -94,6 +107,7 @@ Transmitter::Transmitter()
 Transmitter::~Transmitter()
 {
     munmap(peripherals, 0x002FFFFF);
+    // TODO: Reset the GPIO?
 }
 
 Transmitter* Transmitter::getInstance()
@@ -108,15 +122,15 @@ void Transmitter::play(string filename, double frequency, bool loop)
         throw ErrorReporter("Cannot play, transmitter already in use");
     }
 
-    WaveReader* file = NULL;
+    WaveReader* waveReader = NULL;
     StdinReader* stdin = NULL;
     AudioFormat* format;
 
     bool readStdin = filename == "-";
 
     if (!readStdin) {
-        file = new WaveReader(filename);
-        format = file->getFormat();
+        waveReader = new WaveReader(filename);
+        format = waveReader->getFormat();
     } else {
         stdin = StdinReader::getInstance();
         format = stdin->getFormat();
@@ -130,7 +144,7 @@ void Transmitter::play(string filename, double frequency, bool loop)
 
     unsigned bufferFrames = (unsigned)((unsigned long long)format->sampleRate * BUFFER_TIME / 1000000);
 
-    buffer = (!readStdin) ? file->getFrames(bufferFrames, 0) : stdin->getFrames(bufferFrames, doStop);
+    buffer = (!readStdin) ? waveReader->getFrames(bufferFrames, 0) : stdin->getFrames(bufferFrames, doStop);
 
     pthread_t thread;
     void* params = (void*)&format->sampleRate;
@@ -138,7 +152,7 @@ void Transmitter::play(string filename, double frequency, bool loop)
     int returnCode = pthread_create(&thread, NULL, &Transmitter::transmit, params);
     if (returnCode) {
         if (!readStdin) {
-            delete file;
+            delete waveReader;
         }
         delete format;
         ostringstream oss;
@@ -150,16 +164,16 @@ void Transmitter::play(string filename, double frequency, bool loop)
 
     bool doPlay = true;
     while (doPlay && !doStop) {
-        while ((readStdin || !file->isEnd(frameOffset + bufferFrames)) && !doStop) {
+        while ((readStdin || !waveReader->isEnd(frameOffset + bufferFrames)) && !doStop) {
             if (buffer == NULL) {
-                buffer = (!readStdin) ? file->getFrames(bufferFrames, frameOffset + bufferFrames) : stdin->getFrames(bufferFrames, doStop);
+                buffer = (!readStdin) ? waveReader->getFrames(bufferFrames, frameOffset + bufferFrames) : stdin->getFrames(bufferFrames, doStop);
             }
             usleep(BUFFER_TIME / 2);
         }
         if (loop && !readStdin && !doStop) {
             isTransmitting = false;
 
-            buffer = file->getFrames(bufferFrames, 0);
+            buffer = waveReader->getFrames(bufferFrames, 0);
 
             pthread_join(thread, NULL);
 
@@ -168,7 +182,7 @@ void Transmitter::play(string filename, double frequency, bool loop)
             returnCode = pthread_create(&thread, NULL, &Transmitter::transmit, params);
             if (returnCode) {
                 if (!readStdin) {
-                    delete file;
+                    delete waveReader;
                 }
                 delete format;
                 ostringstream oss;
@@ -184,46 +198,53 @@ void Transmitter::play(string filename, double frequency, bool loop)
     pthread_join(thread, NULL);
 
     if (!readStdin) {
-        delete file;
+        delete waveReader;
     }
     delete format;
 }
 
 void* Transmitter::transmit(void* params)
 {
-    unsigned long long current, start, playbackStart;
+    unsigned long long currentMicroseconds, startMicroseconds, playbackStartMicroseconds;
     unsigned offset, length, temp;
     vector<float>* frames = NULL;
     float value = 0.0;
     float* data;
-#ifndef NO_PREEMP
-    float prevValue = 0.0;
-#endif
-
     unsigned sampleRate = *(unsigned*)(params);
 
-#ifndef NO_PREEMP
+    // This was wrapped in a #ifndef NO_PREEMP guard
+    float prevValue = 0.0;
     float preemp = 0.75 - 250000.0 / (float)(sampleRate * 75);
-#endif
 
+    // Set up clock and peripherals
+
+    // Clear GPFSEL0 bits 12, 13, 14 and set bit 14 (GPIO pin 4 alternate function 1, which is GPCLK0)
     ACCESS(peripherals, GPIO_BASE) = (ACCESS(peripherals, GPIO_BASE) & 0xFFFF8FFF) | (0x01 << 14);
+
+    // Set up the clock manager
+    // PASSWD (0x5A << 24)  // required
+    // MASH (0x01 << 9)  // 1-stage mash filter
+    // ENAB (0x01 << 4) // enable the clock
+    // SRC (0x06)  // 6 = PLLD per
     ACCESS(peripherals, CLK0_BASE) = (0x5A << 24) | (0x01 << 9) | (0x01 << 4) | 0x06;
 
     frameOffset = 0;
-    playbackStart = ACCESS64(peripherals, TCNT_BASE);
-    current = playbackStart;
-    start = playbackStart;
+
+    // playbackStartMicroseconds = current clock timer
+    playbackStartMicroseconds = ACCESS64(peripherals, TCNT_BASE);
+    currentMicroseconds = playbackStartMicroseconds;
+    startMicroseconds = playbackStartMicroseconds;
 
     while (isTransmitting) {
         while ((buffer == NULL) && isTransmitting) {
             usleep(1);
-            current = ACCESS64(peripherals, TCNT_BASE);
+            currentMicroseconds = ACCESS64(peripherals, TCNT_BASE);
         }
         if (!isTransmitting) {
             break;
         }
         frames = buffer;
-        frameOffset = (current - playbackStart) * (sampleRate) / 1000000;
+        frameOffset = (currentMicroseconds - playbackStartMicroseconds) * (sampleRate) / 1000000;
         buffer = NULL;
 
         length = frames->size();
@@ -245,18 +266,19 @@ void* Transmitter::transmit(void* params)
             value = (value < -1.0) ? -1.0 : ((value > 1.0) ? 1.0 : value);
 #endif
 
-            ACCESS(peripherals, CLK0DIV_BASE) = (0x5A << 24) | ((clockDivisor) - (int)(round(value * 16.0)));
+            ACCESS(peripherals, CLK0DIV_BASE) =
+                (0x5A << 24) | ((clockDivisor) - (int)(round(value * 16.0)));
             while (temp >= offset) {
-                asm("nop");
-                current = ACCESS64(peripherals, TCNT_BASE);
-                offset = (current - start) * (sampleRate) / 1000000;
+                asm("nop");  // Super tight timing loop
+                currentMicroseconds = ACCESS64(peripherals, TCNT_BASE);
+                offset = (currentMicroseconds - startMicroseconds) * (sampleRate) / 1000000;
             }
 #ifndef NO_PREEMP
             prevValue = value;
 #endif
         }
 
-        start = ACCESS64(peripherals, TCNT_BASE);
+        startMicroseconds = ACCESS64(peripherals, TCNT_BASE);
         delete frames;
     }
 
@@ -279,8 +301,8 @@ AudioFormat* Transmitter::getFormat(string filename)
         stdin = StdinReader::getInstance();
         format = stdin->getFormat();
     }
-	
-    return format;
+
+   return format;
 }
 
 void Transmitter::stop()

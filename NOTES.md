@@ -2,7 +2,36 @@
 
 Freeform notes as things are getting set up.
 
+
 ## Dev Environment
+
+
+### pigpio
+
+Install `pigpio` following the directions [here](http://abyz.co.uk/rpi/pigpio/download.html):
+
+```bash
+rm pigpio.zip
+sudo rm -rf PIGPIO
+wget abyz.co.uk/rpi/pigpio/pigpio.zip
+unzip pigpio.zip
+cd PIGPIO
+make
+sudo make install
+```
+
+
+### piscope
+
+Install `piscope` following the directions [here](http://abyz.co.uk/rpi/pigpio/piscope.html):
+
+```bash
+wget abyz.co.uk/rpi/pigpio/piscope.tar
+tar xvf piscope.tar
+cd PISCOPE
+make hf
+make install
+```
 
 
 ### Emacs
@@ -95,6 +124,15 @@ Next, install `ggtags` using `MELPA`:
 
 `M-x package-install RET ggtags RET`
 
+
+### Semantic-refactor
+
+Sometimes it's really nice to do rapid code refactoring. Here, Semantic Refactoring
+comes in handy. To install the package:
+
+   1. `M-x list-packages`, then choose `srefactor` and press `i` and `x` to install.
+   1. 
+   
 
 ## Using `mosh`
 
