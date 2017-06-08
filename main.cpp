@@ -50,7 +50,9 @@ void sigIntHandler(int sigNum)
 
 int main(int argc, char** argv)
 {
-    double frequency = 100.0;
+    double frequencyMHz = 100.0;
+    double spreadMHz = 0.078;
+
     bool loop = false;
     string filename;
 
@@ -58,7 +60,12 @@ int main(int argc, char** argv)
     for (int i = 1; i < argc; i++) {
         if (string("-f") == argv[i]) {
             if (i < argc - 1) {
-                frequency = ::atof(argv[i + 1]);
+                frequencyMHz = ::atof(argv[i + 1]);
+                i++;
+            }
+        } else if (string("-f") == argv[i]) {
+            if (i < argc - 1) {
+                spreadMHz = ::atof(argv[i + 1]);
                 i++;
             }
         } else if (string("-r") == argv[i]) {
@@ -70,10 +77,16 @@ int main(int argc, char** argv)
             }
         }
     }
+
     if (showUsage) {
-        cout << "Usage: " << argv[0] << " [-f frequency] [-r] FILE" << endl;
+        cout << "Usage: " << argv[0] << " [-f frequencyMHz=100.0] [-s spreadMHz=0.078] [-r] FILE" << endl;
         return 0;
     }
+
+    cout << "Running with params:" << endl;
+    cout << "frequencyMHz\t" << frequencyMHz << endl;
+    cout << "spreadMHz   \t" << spreadMHz << endl;
+    cout << "filename    \t" << filename << endl;
 
     signal(SIGINT, sigIntHandler);
 
@@ -87,7 +100,7 @@ int main(int argc, char** argv)
              << ((format->channels > 0x01) ? "stereo" : "mono") << endl;
         delete format;
 
-        transmitter->play(filename, frequency, loop);
+        transmitter->play(filename, frequencyMHz, spreadMHz, loop);
     } catch (exception &error) {
         cout << "Error: " << error.what() << endl;
         return 1;

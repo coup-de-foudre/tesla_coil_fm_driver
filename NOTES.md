@@ -5,6 +5,7 @@ Freeform notes as things are getting set up.
 
 ## Dev Environment
 
+These might be useful:
 
 ### pigpio
 
@@ -46,6 +47,9 @@ A few tricks:
       `Use Option key as Meta`.
    3. Install markdown mode (assuming you have installed the tutorial as above)
       using `M-x package-install RET markdown-mode RET`.
+
+See the documentation [here](https://tuhdo.github.io/c-ide.html#sec-2) for how to use 
+this stuff.
 
 #### Company mode
 

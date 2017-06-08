@@ -49,7 +49,7 @@ class Transmitter
     public:
         virtual ~Transmitter();
 
-        void play(string filename, double frequency, bool loop);
+        void play(string filename, double frequencyMHz, double spreadMHz, bool loop);
         void stop();
 
 	static Transmitter* getInstance();
@@ -63,7 +63,10 @@ class Transmitter
         static vector<float>* buffer;
         static unsigned frameOffset, clockDivisor;
         static bool isTransmitting;
+        static double spreadFactor;
         static void* transmit(void* params);
+
+        static const double clockFreqMHz = 500.0;
 };
 
 #endif // TRANSMITTER_H

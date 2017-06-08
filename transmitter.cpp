@@ -65,6 +65,9 @@ using std::ostringstream;
 #define ACCESS(base, offset) *(volatile unsigned*)((int)base + offset)
 #define ACCESS64(base, offset) *(volatile unsigned long long*)((int)base + offset)
 
+//static const double Transmitter::clockFreqMHz = 500.0;
+double Transmitter::spreadFactor = 0.0;
+
 bool Transmitter::isTransmitting = false;
 unsigned Transmitter::clockDivisor = 0;
 unsigned Transmitter::frameOffset = 0;
@@ -116,7 +119,10 @@ Transmitter* Transmitter::getInstance()
     return &instance;
 }
 
-void Transmitter::play(string filename, double frequency, bool loop)
+void Transmitter::play(string filename,
+                       double centerFreqMHz,
+                       double spreadMHz,
+                       bool loop)
 {
     if (isTransmitting) {
         throw ErrorReporter("Cannot play, transmitter already in use");
@@ -125,7 +131,6 @@ void Transmitter::play(string filename, double frequency, bool loop)
     WaveReader* waveReader = NULL;
     StdinReader* stdin = NULL;
     AudioFormat* format;
-
     bool readStdin = filename == "-";
 
     if (!readStdin) {
@@ -137,7 +142,11 @@ void Transmitter::play(string filename, double frequency, bool loop)
         usleep(STDIN_READ_DELAY);
     }
 
-    clockDivisor = (unsigned)((500 << 12) / frequency + 0.5);
+    // The clock divisor is a binary number with a 12-bit fractional part.
+    clockDivisor = (unsigned)((int(clockFreqMHz) << 12) / centerFreqMHz + 0.5);
+
+    // Second order Taylor expansion of division.
+    spreadFactor = (spreadMHz / centerFreqMHz) * (clockFreqMHz / centerFreqMHz);
 
     isTransmitting = true;
     doStop = false;
@@ -225,7 +234,7 @@ void* Transmitter::transmit(void* params)
     // PASSWD (0x5A << 24)  // required
     // MASH (0x01 << 9)  // 1-stage mash filter
     // ENAB (0x01 << 4) // enable the clock
-    // SRC (0x06)  // 6 = PLLD per
+    // SRC (0x06)  // 6 = PLLD per  (either runs at 400 or 500 MHz)
     ACCESS(peripherals, CLK0_BASE) = (0x5A << 24) | (0x01 << 9) | (0x01 << 4) | 0x06;
 
     frameOffset = 0;
@@ -244,6 +253,7 @@ void* Transmitter::transmit(void* params)
             break;
         }
         frames = buffer;
+
         frameOffset = (currentMicroseconds - playbackStartMicroseconds) * (sampleRate) / 1000000;
         buffer = NULL;
 
@@ -261,13 +271,19 @@ void* Transmitter::transmit(void* params)
 
             value = data[offset];
 
-#ifndef NO_PREEMP
-            value = value + (value - prevValue) * preemp;
-            value = (value < -1.0) ? -1.0 : ((value > 1.0) ? 1.0 : value);
-#endif
+            /** WRAPPED IN NO_PREMP **/
 
+            // Preemphasis correction
+            value = value + (value - prevValue) * preemp;
+
+            // Clip value
+            value = (value < -1.0) ? -1.0 : ((value > 1.0) ? 1.0 : value);
+
+            /** END NO_PREMP **/
+
+            // 5A << 24 is the password, 16.0 = 16MHz the spread of the signal?
             ACCESS(peripherals, CLK0DIV_BASE) =
-                (0x5A << 24) | ((clockDivisor) - (int)(round(value * 16.0)));
+                (0x5A << 24) | ((clockDivisor) - (int)(round(value * spreadFactor)));
             while (temp >= offset) {
                 asm("nop");  // Super tight timing loop
                 currentMicroseconds = ACCESS64(peripherals, TCNT_BASE);
@@ -282,6 +298,7 @@ void* Transmitter::transmit(void* params)
         delete frames;
     }
 
+    // Reset to zero
     ACCESS(peripherals, CLK0_BASE) = (0x5A << 24);
 
     return NULL;
