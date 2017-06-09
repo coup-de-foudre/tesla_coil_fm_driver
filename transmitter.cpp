@@ -51,9 +51,13 @@ using std::ostringstream;
 
 // Clock Manager General Purpose Clocks Control CM_GP0CTL
 #define CLK0_BASE 0x00101070
+#define CLK1_BASE 0x00101078
+#define CLK2_BASE 0x00101080
 
 /// Clock Manager General Purpose Clock Divisors CM_GP0DIV
 #define CLK0DIV_BASE 0x00101074
+#define CLK1DIV_BASE 0x0010107c
+#define CLK2DIV_BASE 0x00101084
 
 // The ST system timer which provides a 64-bit system counter
 //   CLO 32-bit lower part of the counter at register 0x7E003004 (virtual)
@@ -228,14 +232,33 @@ void* Transmitter::transmit(void* params)
     // Set up clock and peripherals
 
     // Clear GPFSEL0 bits 12, 13, 14 and set bit 14 (GPIO pin 4 alternate function 1, which is GPCLK0)
-    ACCESS(peripherals, GPIO_BASE) = (ACCESS(peripherals, GPIO_BASE) & 0xFFFF8FFF) | (0x01 << 14);
+    //ACCESS(peripherals, GPIO_BASE) = (ACCESS(peripherals, GPIO_BASE) & 0xFFFF8FFF) | (0x01 << 14);
+    ACCESS(peripherals, GPIO_BASE) = (ACCESS(peripherals, GPIO_BASE) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
+
 
     // Set up the clock manager
     // PASSWD (0x5A << 24)  // required
     // MASH (0x01 << 9)  // 1-stage mash filter
     // ENAB (0x01 << 4) // enable the clock
     // SRC (0x06)  // 6 = PLLD per  (either runs at 400 or 500 MHz)
-    ACCESS(peripherals, CLK0_BASE) = (0x5A << 24) | (0x01 << 9) | (0x01 << 4) | 0x06;
+
+
+
+    ACCESS(peripherals, CLK0_BASE) =
+        (0x5A << 24) |
+        (0x01 << 9) |
+        (0x01 << 4) |
+        0x06;
+    // ACCESS(peripherals, CLK1_BASE) =
+    //  (0x5A << 24) |
+    //  (0x01 << 9) |
+    //  (0x01 << 4) |
+    //  0x06;
+    //ACCESS(peripherals, CLK2_BASE) =
+    //  (0x5A << 24) |
+    //  (0x01 << 9) |
+    //  (0x01 << 4) |
+    //  0x06;
 
     frameOffset = 0;
 
@@ -282,9 +305,17 @@ void* Transmitter::transmit(void* params)
             /** END NO_PREMP **/
 
             // 5A << 24 is the password, 16.0 = 16MHz the spread of the signal?
-            ACCESS(peripherals, CLK0DIV_BASE) =
-                (0x5A << 24) | ((clockDivisor) - (int)(round(value * spreadFactor)));
+            unsigned new_divisor = (0x5A << 24) | ((clockDivisor) - (int)(round(value * spreadFactor)));
+            ACCESS(peripherals, CLK0DIV_BASE) = new_divisor;
+            //(0x5A << 24) | ((clockDivisor) - (int)(round(value * spreadFactor)));
+
+            //ACCESS(peripherals, CLK1DIV_BASE) = new_divisor;
+            //(0x5A << 24) | ((clockDivisor) - (int)(round(value * spreadFactor)));
+
+            // ACCESS(peripherals, CLK2DIV_BASE) = new_divisor;
+
             while (temp >= offset) {
+
                 asm("nop");  // Super tight timing loop
                 currentMicroseconds = ACCESS64(peripherals, TCNT_BASE);
                 offset = (currentMicroseconds - startMicroseconds) * (sampleRate) / 1000000;
@@ -300,6 +331,8 @@ void* Transmitter::transmit(void* params)
 
     // Reset to zero
     ACCESS(peripherals, CLK0_BASE) = (0x5A << 24);
+    //ACCESS(peripherals, CLK1_BASE) = (0x5A << 24);
+    //ACCESS(peripherals, CLK2_BASE) = (0x5A << 24);
 
     return NULL;
 }
