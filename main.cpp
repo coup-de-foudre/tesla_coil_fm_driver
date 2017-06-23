@@ -63,7 +63,7 @@ int main(int argc, char** argv)
                 frequencyMHz = ::atof(argv[i + 1]);
                 i++;
             }
-        } else if (string("-f") == argv[i]) {
+        } else if (string("-s") == argv[i]) {
             if (i < argc - 1) {
                 spreadMHz = ::atof(argv[i + 1]);
                 i++;
