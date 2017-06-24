@@ -149,8 +149,8 @@ void Transmitter::play(string filename,
     // The clock divisor is a binary number with a 12-bit fractional part.
     clockDivisor = (unsigned)((int(clockFreqMHz) << 12) / centerFreqMHz + 0.5);
 
-    // Second order Taylor expansion of division.
-    spreadFactor = (spreadMHz / centerFreqMHz) * (clockFreqMHz / centerFreqMHz);
+    // From the second-order Taylor expansion, scaled by 2^12
+    spreadFactor = 4096.0 * (spreadMHz / centerFreqMHz) * (clockFreqMHz / centerFreqMHz);
 
     isTransmitting = true;
     doStop = false;
@@ -232,8 +232,10 @@ void* Transmitter::transmit(void* params)
     // Set up clock and peripherals
 
     // Clear GPFSEL0 bits 12, 13, 14 and set bit 14 (GPIO pin 4 alternate function 1, which is GPCLK0)
-    //ACCESS(peripherals, GPIO_BASE) = (ACCESS(peripherals, GPIO_BASE) & 0xFFFF8FFF) | (0x01 << 14);
-    ACCESS(peripherals, GPIO_BASE) = (ACCESS(peripherals, GPIO_BASE) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
+    ACCESS(peripherals, GPIO_BASE) = (ACCESS(peripherals, GPIO_BASE) & 0xFFFF8FFF) | (0x01 << 14);
+
+    // This enables all 3...
+    //ACCESS(peripherals, GPIO_BASE) = (ACCESS(peripherals, GPIO_BASE) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
 
 
     // Set up the clock manager
@@ -294,35 +296,25 @@ void* Transmitter::transmit(void* params)
 
             value = data[offset];
 
-            /** WRAPPED IN NO_PREMP **/
-
             // Preemphasis correction
             value = value + (value - prevValue) * preemp;
 
             // Clip value
             value = (value < -1.0) ? -1.0 : ((value > 1.0) ? 1.0 : value);
 
-            /** END NO_PREMP **/
-
             // 5A << 24 is the password, 16.0 = 16MHz the spread of the signal?
+            // NB: new_divisor is a 24-bit number, with 12-bit integral and 12-bit fractional parts.
             unsigned new_divisor = (0x5A << 24) | ((clockDivisor) - (int)(round(value * spreadFactor)));
             ACCESS(peripherals, CLK0DIV_BASE) = new_divisor;
-            //(0x5A << 24) | ((clockDivisor) - (int)(round(value * spreadFactor)));
-
-            //ACCESS(peripherals, CLK1DIV_BASE) = new_divisor;
-            //(0x5A << 24) | ((clockDivisor) - (int)(round(value * spreadFactor)));
-
-            // ACCESS(peripherals, CLK2DIV_BASE) = new_divisor;
 
             while (temp >= offset) {
-
                 asm("nop");  // Super tight timing loop
                 currentMicroseconds = ACCESS64(peripherals, TCNT_BASE);
+
+                // TODO: This overflows about every 71 minutes, which will result an immediate shutoff
                 offset = (currentMicroseconds - startMicroseconds) * (sampleRate) / 1000000;
             }
-#ifndef NO_PREEMP
             prevValue = value;
-#endif
         }
 
         startMicroseconds = ACCESS64(peripherals, TCNT_BASE);
