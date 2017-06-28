@@ -140,6 +140,18 @@ void Transmitter::setTransmitValue(double value){
     ACCESS(peripherals_, CLK0DIV_BASE) = PASSWORD | (0x00FFFFFF & clockDivisor) ;
 }
 
+// Set the center frequency and update the transmission
+void Transmitter::setCenterFreqMHz(double centerFreqMHz) {
+    centerFreqMHz_ = centerFreqMHz;
+    return setTransmitValue(currentValue_);
+}
+
+// Set the spread and update the transmission
+void Transmitter::setSpreadMHz(double spreadMHz) {
+    spreadMHz_ = spreadMHz;
+    return setTransmitValue(currentValue_);
+}
+
 void Transmitter::play(string filename,
                        double centerFreqMHz,
                        double spreadMHz,

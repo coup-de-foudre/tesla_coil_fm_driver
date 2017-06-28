@@ -72,7 +72,9 @@ private:
     static double currentValue_;
     static const double clockFreqMHz_ = 500.0;
 
-    void setCenterFrequency(double centerFreqMHz);
+    void setCenterFreqMHz(double centerFreqMHz);
+
+    void setSpreadMHz(double spreadMHz);
 };
 
 #endif // TRANSMITTER_H
