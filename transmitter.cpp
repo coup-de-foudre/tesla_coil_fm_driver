@@ -69,14 +69,16 @@ using std::ostringstream;
 #define ACCESS(base, offset) *(volatile unsigned*)((int)base + offset)
 #define ACCESS64(base, offset) *(volatile unsigned long long*)((int)base + offset)
 
-//static const double Transmitter::clockFreqMHz = 500.0;
-double Transmitter::spreadFactor = 0.0;
+double Transmitter::centerFreqMHz_ = 0.0;
+double Transmitter::spreadMHz_ = 0.0;
+double Transmitter::spreadFactor_ = 0.0;
+double Transmitter::currentValue_ = 0.0;
 
-bool Transmitter::isTransmitting = false;
-unsigned Transmitter::clockDivisor = 0;
-unsigned Transmitter::frameOffset = 0;
-vector<float>* Transmitter::buffer = NULL;
-void* Transmitter::peripherals = NULL;
+bool Transmitter::isTransmitting_ = false;
+unsigned Transmitter::frameOffset_ = 0;
+vector<float>* Transmitter::buffer_ = NULL;
+void* Transmitter::peripherals_ = NULL;
+
 
 Transmitter::Transmitter()
 {
@@ -104,16 +106,16 @@ Transmitter::Transmitter()
         throw ErrorReporter("Cannot open /dev/mem (permission denied)");
     }
 
-    peripherals = mmap(NULL, 0x002FFFFF, PROT_READ | PROT_WRITE, MAP_SHARED, memFd, isBcm2835 ? 0x20000000 : 0x3F000000);
+    peripherals_ = mmap(NULL, 0x002FFFFF, PROT_READ | PROT_WRITE, MAP_SHARED, memFd, isBcm2835 ? 0x20000000 : 0x3F000000);
     close(memFd);
-    if (peripherals == MAP_FAILED) {
-        throw ErrorReporter("Cannot obtain access to peripherals (mmap error)");
+    if (peripherals_ == MAP_FAILED) {
+        throw ErrorReporter("Cannot obtain access to peripherals_ (mmap error)");
     }
 }
 
 Transmitter::~Transmitter()
 {
-    munmap(peripherals, 0x002FFFFF);
+    munmap(peripherals_, 0x002FFFFF);
     // TODO: Reset the GPIO?
 }
 
@@ -123,12 +125,19 @@ Transmitter* Transmitter::getInstance()
     return &instance;
 }
 
+void Transmitter::setClockDivisor(double value){
+    unsigned clockDivisor_ = (unsigned)((int(clockFreqMHz_) << 12) / centerFreqMHz_ + 0.5);
+    unsigned newDivisor = (0x5A << 24) | ((clockDivisor_) - (int)(round(value * spreadFactor_)));
+    currentValue_ = value;
+    ACCESS(peripherals_, CLK0DIV_BASE) = newDivisor;
+}
+
 void Transmitter::play(string filename,
                        double centerFreqMHz,
                        double spreadMHz,
                        bool loop)
 {
-    if (isTransmitting) {
+    if (isTransmitting_) {
         throw ErrorReporter("Cannot play, transmitter already in use");
     }
 
@@ -146,18 +155,17 @@ void Transmitter::play(string filename,
         usleep(STDIN_READ_DELAY);
     }
 
-    // The clock divisor is a binary number with a 12-bit fractional part.
-    clockDivisor = (unsigned)((int(clockFreqMHz) << 12) / centerFreqMHz + 0.5);
-
+    centerFreqMHz_ = centerFreqMHz;
+    spreadMHz_ = spreadMHz;
     // From the second-order Taylor expansion, scaled by 2^12
-    spreadFactor = 4096.0 * (spreadMHz / centerFreqMHz) * (clockFreqMHz / centerFreqMHz);
+    spreadFactor_ = 4096.0 * (spreadMHz / centerFreqMHz) * (clockFreqMHz_ / centerFreqMHz);
 
-    isTransmitting = true;
+    isTransmitting_ = true;
     doStop = false;
 
     unsigned bufferFrames = (unsigned)((unsigned long long)format->sampleRate * BUFFER_TIME / 1000000);
 
-    buffer = (!readStdin) ? waveReader->getFrames(bufferFrames, 0) : stdin->getFrames(bufferFrames, doStop);
+    buffer_ = (!readStdin) ? waveReader->getFrames(bufferFrames, 0) : stdin->getFrames(bufferFrames, doStop);
 
     pthread_t thread;
     void* params = (void*)&format->sampleRate;
@@ -177,20 +185,20 @@ void Transmitter::play(string filename,
 
     bool doPlay = true;
     while (doPlay && !doStop) {
-        while ((readStdin || !waveReader->isEnd(frameOffset + bufferFrames)) && !doStop) {
-            if (buffer == NULL) {
-                buffer = (!readStdin) ? waveReader->getFrames(bufferFrames, frameOffset + bufferFrames) : stdin->getFrames(bufferFrames, doStop);
+        while ((readStdin || !waveReader->isEnd(frameOffset_ + bufferFrames)) && !doStop) {
+            if (buffer_ == NULL) {
+                buffer_ = (!readStdin) ? waveReader->getFrames(bufferFrames, frameOffset_ + bufferFrames) : stdin->getFrames(bufferFrames, doStop);
             }
             usleep(BUFFER_TIME / 2);
         }
         if (loop && !readStdin && !doStop) {
-            isTransmitting = false;
+            isTransmitting_ = false;
 
-            buffer = waveReader->getFrames(bufferFrames, 0);
+            buffer_ = waveReader->getFrames(bufferFrames, 0);
 
             pthread_join(thread, NULL);
 
-            isTransmitting = true;
+            isTransmitting_ = true;
 
             returnCode = pthread_create(&thread, NULL, &Transmitter::transmit, params);
             if (returnCode) {
@@ -206,7 +214,7 @@ void Transmitter::play(string filename,
             doPlay = false;
         }
     }
-    isTransmitting = false;
+    isTransmitting_ = false;
 
     pthread_join(thread, NULL);
 
@@ -232,10 +240,10 @@ void* Transmitter::transmit(void* params)
     // Set up clock and peripherals
 
     // Clear GPFSEL0 bits 12, 13, 14 and set bit 14 (GPIO pin 4 alternate function 1, which is GPCLK0)
-    ACCESS(peripherals, GPIO_BASE) = (ACCESS(peripherals, GPIO_BASE) & 0xFFFF8FFF) | (0x01 << 14);
+    ACCESS(peripherals_, GPIO_BASE) = (ACCESS(peripherals_, GPIO_BASE) & 0xFFFF8FFF) | (0x01 << 14);
 
     // This enables all 3...
-    //ACCESS(peripherals, GPIO_BASE) = (ACCESS(peripherals, GPIO_BASE) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
+    //ACCESS(peripherals_, GPIO_BASE) = (ACCESS(peripherals_, GPIO_BASE) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
 
 
     // Set up the clock manager
@@ -246,41 +254,41 @@ void* Transmitter::transmit(void* params)
 
 
 
-    ACCESS(peripherals, CLK0_BASE) =
+    ACCESS(peripherals_, CLK0_BASE) =
         (0x5A << 24) |
         (0x01 << 9) |
         (0x01 << 4) |
         0x06;
-    // ACCESS(peripherals, CLK1_BASE) =
+    // ACCESS(peripherals_, CLK1_BASE) =
     //  (0x5A << 24) |
     //  (0x01 << 9) |
     //  (0x01 << 4) |
     //  0x06;
-    //ACCESS(peripherals, CLK2_BASE) =
+    //ACCESS(peripherals_, CLK2_BASE) =
     //  (0x5A << 24) |
     //  (0x01 << 9) |
     //  (0x01 << 4) |
     //  0x06;
 
-    frameOffset = 0;
+    frameOffset_ = 0;
 
     // playbackStartMicroseconds = current clock timer
-    playbackStartMicroseconds = ACCESS64(peripherals, TCNT_BASE);
+    playbackStartMicroseconds = ACCESS64(peripherals_, TCNT_BASE);
     currentMicroseconds = playbackStartMicroseconds;
     startMicroseconds = playbackStartMicroseconds;
 
-    while (isTransmitting) {
-        while ((buffer == NULL) && isTransmitting) {
+    while (isTransmitting_) {
+        while ((buffer_ == NULL) && isTransmitting_) {
             usleep(1);
-            currentMicroseconds = ACCESS64(peripherals, TCNT_BASE);
+            currentMicroseconds = ACCESS64(peripherals_, TCNT_BASE);
         }
-        if (!isTransmitting) {
+        if (!isTransmitting_) {
             break;
         }
-        frames = buffer;
+        frames = buffer_;
 
-        frameOffset = (currentMicroseconds - playbackStartMicroseconds) * (sampleRate) / 1000000;
-        buffer = NULL;
+        frameOffset_ = (currentMicroseconds - playbackStartMicroseconds) * (sampleRate) / 1000000;
+        buffer_ = NULL;
 
         length = frames->size();
         data = &(*frames)[0];
@@ -303,13 +311,12 @@ void* Transmitter::transmit(void* params)
             value = (value < -1.0) ? -1.0 : ((value > 1.0) ? 1.0 : value);
 
             // 5A << 24 is the password, 16.0 = 16MHz the spread of the signal?
-            // NB: new_divisor is a 24-bit number, with 12-bit integral and 12-bit fractional parts.
-            unsigned new_divisor = (0x5A << 24) | ((clockDivisor) - (int)(round(value * spreadFactor)));
-            ACCESS(peripherals, CLK0DIV_BASE) = new_divisor;
+            // NB: newDivisor is a 24-bit number, with 12-bit integral and 12-bit fractional parts.
+            setClockDivisor(value);
 
             while (temp >= offset) {
-                asm("nop");  // Super tight timing loop
-                currentMicroseconds = ACCESS64(peripherals, TCNT_BASE);
+                asm("nop");  // Super tight timing loop will run CPU at full blast
+                currentMicroseconds = ACCESS64(peripherals_, TCNT_BASE);
 
                 // TODO: This overflows about every 71 minutes, which will result an immediate shutoff
                 offset = (currentMicroseconds - startMicroseconds) * (sampleRate) / 1000000;
@@ -317,14 +324,14 @@ void* Transmitter::transmit(void* params)
             prevValue = value;
         }
 
-        startMicroseconds = ACCESS64(peripherals, TCNT_BASE);
+        startMicroseconds = ACCESS64(peripherals_, TCNT_BASE);
         delete frames;
     }
 
     // Reset to zero
-    ACCESS(peripherals, CLK0_BASE) = (0x5A << 24);
-    //ACCESS(peripherals, CLK1_BASE) = (0x5A << 24);
-    //ACCESS(peripherals, CLK2_BASE) = (0x5A << 24);
+    ACCESS(peripherals_, CLK0_BASE) = (0x5A << 24);
+    //ACCESS(peripherals_, CLK1_BASE) = (0x5A << 24);
+    //ACCESS(peripherals_, CLK2_BASE) = (0x5A << 24);
 
     return NULL;
 }
