@@ -141,7 +141,7 @@ void Transmitter::setClockDivisor(double value){
     } else {
         clockDivisor = (unsigned) (divisor * 4096.0 + 0.5);
     }
-    ACCESS(peripherals_, CLK0DIV_BASE) = PASSWORD | (0x00FFFFFF && clockDivisor) ;
+    ACCESS(peripherals_, CLK0DIV_BASE) = PASSWORD | (0x00FFFFFF & clockDivisor) ;
 }
 
 void Transmitter::play(string filename,
