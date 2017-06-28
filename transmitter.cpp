@@ -64,10 +64,15 @@ using std::ostringstream;
 //   CHI 32-bit upper part of the counter at register 0x7E003008 (virtual)
 #define TCNT_BASE 0x00003004
 
+// The password for many of the peripherals
+#define PASSWORD 0x5A000000
+
 #define STDIN_READ_DELAY 700000
 
 #define ACCESS(base, offset) *(volatile unsigned*)((int)base + offset)
 #define ACCESS64(base, offset) *(volatile unsigned long long*)((int)base + offset)
+
+
 
 double Transmitter::centerFreqMHz_ = 0.0;
 double Transmitter::spreadMHz_ = 0.0;
@@ -126,10 +131,17 @@ Transmitter* Transmitter::getInstance()
 }
 
 void Transmitter::setClockDivisor(double value){
-    unsigned clockDivisor_ = (unsigned)((int(clockFreqMHz_) << 12) / centerFreqMHz_ + 0.5);
-    unsigned newDivisor = (0x5A << 24) | ((clockDivisor_) - (int)(round(value * spreadFactor_)));
     currentValue_ = value;
-    ACCESS(peripherals_, CLK0DIV_BASE) = newDivisor;
+    double divisor = clockFreqMHz_ / (spreadMHz_ * value + centerFreqMHz_);
+    unsigned clockDivisor;
+    if (divisor <= 0.0) {
+        clockDivisor = 1;
+    } else if (divisor >= 4095.5) {
+        clockDivisor = 1 << 24;
+    } else {
+        clockDivisor = (unsigned) (divisor * 4096.0 + 0.5);
+    }
+    ACCESS(peripherals_, CLK0DIV_BASE) = PASSWORD | (0x00FFFFFF && clockDivisor) ;
 }
 
 void Transmitter::play(string filename,
