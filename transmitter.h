@@ -52,21 +52,27 @@ class Transmitter
         void play(string filename, double frequencyMHz, double spreadMHz, bool loop);
         void stop();
 
-	static Transmitter* getInstance();
+	    static Transmitter* getInstance();
         static AudioFormat* getFormat(string filename);
+
     private:
         Transmitter();
 
         bool doStop;
 
-        static void* peripherals;
-        static vector<float>* buffer;
-        static unsigned frameOffset, clockDivisor;
-        static bool isTransmitting;
-        static double spreadFactor;
+        static void setClockDivisor(double value);
         static void* transmit(void* params);
 
-        static const double clockFreqMHz = 500.0;
+        static void* peripherals_;
+        static vector<float>* buffer_;
+        static unsigned frameOffset_;
+        static bool isTransmitting_;
+        static double spreadFactor_;
+        static double centerFreqMHz_;
+        static double spreadMHz_;
+        static double currentValue_;
+        static const double clockFreqMHz_ = 500.0;
+
 };
 
 #endif // TRANSMITTER_H
