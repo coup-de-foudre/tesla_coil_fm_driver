@@ -86,7 +86,7 @@ void *StdinReader::readStdin(void *params)
         if (doStop) {
             break;
         }
-        unsigned streamSize = stream.size();
+        unsigned streamSize = (unsigned int) stream.size();
         if (streamSize < MAX_STREAM_SIZE) {
             int bytes = read(STDIN_FILENO, readBuffer, (streamSize + 1024 > MAX_STREAM_SIZE) ? MAX_STREAM_SIZE - streamSize : 1024);
             if (bytes > 0) {
@@ -115,7 +115,7 @@ vector<float>* StdinReader::getFrames(unsigned frameCount, bool &forceStop)
     isDataAccess = true;
 
     unsigned offset, bytesToRead, bytesPerFrame;
-    unsigned streamSize = stream.size();
+    unsigned streamSize = (unsigned int) stream.size();
     if (!streamSize) {
         isDataAccess = false;
         return NULL;

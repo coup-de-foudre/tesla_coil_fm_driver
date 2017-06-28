@@ -34,10 +34,7 @@
 #include "transmitter.h"
 #include "wave_reader.h"
 #include "stdin_reader.h"
-#include <iostream>
 #include <sstream>
-#include <cmath>
-#include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
 
@@ -73,10 +70,8 @@ using std::ostringstream;
 #define ACCESS64(base, offset) *(volatile unsigned long long*)((int)base + offset)
 
 
-
 double Transmitter::centerFreqMHz_ = 0.0;
 double Transmitter::spreadMHz_ = 0.0;
-double Transmitter::spreadFactor_ = 0.0;
 double Transmitter::currentValue_ = 0.0;
 
 bool Transmitter::isTransmitting_ = false;
@@ -130,7 +125,8 @@ Transmitter* Transmitter::getInstance()
     return &instance;
 }
 
-void Transmitter::setClockDivisor(double value){
+// Set the transmit frequency offset from the current spreadFreqMHz and centerFreqMHz
+void Transmitter::setTransmitValue(double value){
     currentValue_ = value;
     double divisor = clockFreqMHz_ / (spreadMHz_ * value + centerFreqMHz_);
     unsigned clockDivisor;
@@ -141,7 +137,7 @@ void Transmitter::setClockDivisor(double value){
     } else {
         clockDivisor = (unsigned) (divisor * 4096.0 + 0.5);
     }
-    ACCESS(peripherals_, CLK0DIV_BASE) = PASSWORD | (0x00FFFFFF && clockDivisor) ;
+    ACCESS(peripherals_, CLK0DIV_BASE) = PASSWORD | (0x00FFFFFF & clockDivisor) ;
 }
 
 void Transmitter::play(string filename,
@@ -169,8 +165,6 @@ void Transmitter::play(string filename,
 
     centerFreqMHz_ = centerFreqMHz;
     spreadMHz_ = spreadMHz;
-    // From the second-order Taylor expansion, scaled by 2^12
-    spreadFactor_ = 4096.0 * (spreadMHz / centerFreqMHz) * (clockFreqMHz_ / centerFreqMHz);
 
     isTransmitting_ = true;
     doStop = false;
@@ -180,6 +174,7 @@ void Transmitter::play(string filename,
     buffer_ = (!readStdin) ? waveReader->getFrames(bufferFrames, 0) : stdin->getFrames(bufferFrames, doStop);
 
     pthread_t thread;
+
     void* params = (void*)&format->sampleRate;
 
     int returnCode = pthread_create(&thread, NULL, &Transmitter::transmit, params);
@@ -197,9 +192,13 @@ void Transmitter::play(string filename,
 
     bool doPlay = true;
     while (doPlay && !doStop) {
-        while ((readStdin || !waveReader->isEnd(frameOffset_ + bufferFrames)) && !doStop) {
+        while ((readStdin || !waveReader->isEnd((unsigned int) (frameOffset_ + bufferFrames))) && !doStop) {
             if (buffer_ == NULL) {
-                buffer_ = (!readStdin) ? waveReader->getFrames(bufferFrames, frameOffset_ + bufferFrames) : stdin->getFrames(bufferFrames, doStop);
+                if (!readStdin) {
+                    buffer_ = waveReader->getFrames(bufferFrames, (unsigned int) (frameOffset_ + bufferFrames));
+                } else {
+                    buffer_ = stdin->getFrames(bufferFrames, doStop);
+                }
             }
             usleep(BUFFER_TIME / 2);
         }
@@ -239,15 +238,17 @@ void Transmitter::play(string filename,
 void* Transmitter::transmit(void* params)
 {
     unsigned long long currentMicroseconds, startMicroseconds, playbackStartMicroseconds;
-    unsigned offset, length, temp;
+    unsigned long offset;
+    unsigned long length;
+    unsigned long temp;
     vector<float>* frames = NULL;
-    float value = 0.0;
+    double value = 0.0;
     float* data;
     unsigned sampleRate = *(unsigned*)(params);
 
     // This was wrapped in a #ifndef NO_PREEMP guard
-    float prevValue = 0.0;
-    float preemp = 0.75 - 250000.0 / (float)(sampleRate * 75);
+    double prevValue = 0.0;
+    double preemp = 0.75 - 250000.0 / (double)(sampleRate * 75);
 
     // Set up clock and peripherals
 
@@ -316,7 +317,7 @@ void* Transmitter::transmit(void* params)
 
             value = data[offset];
 
-            // Preemphasis correction
+            // Pre emphasis correction
             value = value + (value - prevValue) * preemp;
 
             // Clip value
@@ -324,14 +325,13 @@ void* Transmitter::transmit(void* params)
 
             // 5A << 24 is the password, 16.0 = 16MHz the spread of the signal?
             // NB: newDivisor is a 24-bit number, with 12-bit integral and 12-bit fractional parts.
-            setClockDivisor(value);
+            setTransmitValue(value);
 
             while (temp >= offset) {
                 asm("nop");  // Super tight timing loop will run CPU at full blast
                 currentMicroseconds = ACCESS64(peripherals_, TCNT_BASE);
 
-                // TODO: This overflows about every 71 minutes, which will result an immediate shutoff
-                offset = (currentMicroseconds - startMicroseconds) * (sampleRate) / 1000000;
+                offset = ((currentMicroseconds - startMicroseconds) * (sampleRate)) / 1000000;
             }
             prevValue = value;
         }

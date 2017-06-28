@@ -46,33 +46,33 @@ using std::string;
 
 class Transmitter
 {
-    public:
-        virtual ~Transmitter();
+public:
+    virtual ~Transmitter();
 
-        void play(string filename, double frequencyMHz, double spreadMHz, bool loop);
-        void stop();
+    void play(string filename, double frequencyMHz, double spreadMHz, bool loop);
+    void stop();
 
-	    static Transmitter* getInstance();
-        static AudioFormat* getFormat(string filename);
+    static Transmitter* getInstance();
+    static AudioFormat* getFormat(string filename);
 
-    private:
-        Transmitter();
+private:
+    Transmitter();
 
-        bool doStop;
+    bool doStop;
 
-        static void setClockDivisor(double value);
-        static void* transmit(void* params);
+    static void setTransmitValue(double value);
+    static void* transmit(void* params);
 
-        static void* peripherals_;
-        static vector<float>* buffer_;
-        static unsigned frameOffset_;
-        static bool isTransmitting_;
-        static double spreadFactor_;
-        static double centerFreqMHz_;
-        static double spreadMHz_;
-        static double currentValue_;
-        static const double clockFreqMHz_ = 500.0;
+    static void* peripherals_;
+    static vector<float>* buffer_;
+    static unsigned long long frameOffset_;
+    static bool isTransmitting_;
+    static double centerFreqMHz_;
+    static double spreadMHz_;
+    static double currentValue_;
+    static const double clockFreqMHz_ = 500.0;
 
+    void setCenterFrequency(double centerFreqMHz);
 };
 
 #endif // TRANSMITTER_H
