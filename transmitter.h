@@ -63,7 +63,7 @@ private:
     static void setTransmitValue(double value);
     static void* transmit(void* params);
 
-    static void* peripherals_;
+    static void* peripheralsBase_;
     static vector<float>* buffer_;
     static unsigned long long frameOffset_;
     static bool isTransmitting_;
