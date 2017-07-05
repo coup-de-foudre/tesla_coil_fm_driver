@@ -55,9 +55,8 @@ unsigned Transmitter::frameOffset_ = 0;
 vector<float>* Transmitter::buffer_ = NULL;
 void* Transmitter::peripheralsBase_ = NULL;
 
-
-Transmitter::Transmitter()
-{
+// Check if machine is BCM2835
+bool isBcm2835() {
     bool isBcm2835 = true;
 
     FILE* pipe = popen("uname -m", "r");
@@ -76,24 +75,34 @@ Transmitter::Transmitter()
             isBcm2835 = false;
         }
     }
+    return isBcm2835;
+}
 
+void* mmapPeripherals() {
     int memFd;
     if ((memFd = open("/dev/mem", O_RDWR | O_SYNC)) < 0) {
         throw ErrorReporter("Cannot open /dev/mem (permission denied)");
     }
 
-    peripheralsBase_ = mmap(NULL, 0x002FFFFF, PROT_READ | PROT_WRITE, MAP_SHARED, memFd,
-                            isBcm2835 ? BCM2835_PERIPHERAL_BASE : PERIPHERAL_BASE);
+    void* peripheralsBase = mmap(NULL, PERIPHERAL_LENGTH, PROT_READ | PROT_WRITE, MAP_SHARED, memFd,
+                             isBcm2835() ? BCM2835_PERIPHERAL_BASE : PERIPHERAL_BASE);
     close(memFd);
-    if (peripheralsBase_ == MAP_FAILED) {
+    if (peripheralsBase == MAP_FAILED) {
         throw ErrorReporter("Cannot obtain access to peripherals_ (mmap error)");
     }
+
+    return peripheralsBase;
+}
+
+Transmitter::Transmitter()
+{
+    peripheralsBase_ = mmapPeripherals();
 }
 
 Transmitter::~Transmitter()
 {
-    munmap(peripheralsBase_, 0x002FFFFF);
-    // TODO: Reset the GPIO?
+    munmap(peripheralsBase_, PERIPHERAL_LENGTH);
+    // TODO: Reset the GPIO
 }
 
 Transmitter* Transmitter::getInstance()
