@@ -55,9 +55,51 @@ unsigned Transmitter::frameOffset_ = 0;
 vector<float>* Transmitter::buffer_ = NULL;
 void* Transmitter::peripheralsBase_ = NULL;
 
-// Check if machine is BCM2835
+/*
+ * Code flow plan:
+ *
+ * Transmitter::Transmitter()
+ *    - Current:
+ *        - memory map peripherals
+ *    - Should:
+ *        - memory map peripherals,
+ *        - safely start the clock
+ *             :: disable clock
+ *             :: set divisor safely before start
+ *             :: wait for busy bit to clear
+ *             :: enable clock
+ *             :: wind transmit frequency to center frequency over period of time
+ *
+ * Transmitter::~Transmitter()
+ *    - Current:
+ *        - unmap peripherals
+ *    - Should:
+ *        - gracefully stop clock
+ *            :: wind transmit frequency away from center frequency over period of time
+ *            :: disable clock
+ *            :: wait for busy bit to clear
+ *        - unmap peripherals
+ *
+ *
+ * Transmitter::play()
+ *    - Current:
+ *        - Reads first frame
+ *        - Starts transmit thread with sample rate set
+ *        -
+  *    - Should:
+ *        - TODO
+ *
+ * Transmitter::transmit()
+ *    - Current:
+ *        - enables clock
+ *        - sets divisor
+ *        - plays sample when enough time passes (if ready)
+ *    -
+ */
+
+
 bool isBcm2835() {
-    bool isBcm2835 = true;
+    bool bcm2835Flag = true;
 
     FILE* pipe = popen("uname -m", "r");
     if (pipe) {
@@ -72,10 +114,10 @@ bool isBcm2835() {
 
         machine = machine.substr(0, machine.length() - 1);
         if (machine != "armv6l") {
-            isBcm2835 = false;
+            bcm2835Flag = false;
         }
     }
-    return isBcm2835;
+    return bcm2835Flag;
 }
 
 void* mmapPeripherals() {
