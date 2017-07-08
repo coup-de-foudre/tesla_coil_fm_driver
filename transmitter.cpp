@@ -136,6 +136,32 @@ void* mmapPeripherals() {
     return peripheralsBase;
 }
 
+
+void startTransmitter() {
+
+    // TODO: Store current value in the GPIO_BASE
+
+    // TODO: Reset clock divisor to safe value
+
+    // Clear GPFSEL0 bits 12, 13, 14 and set bit 14 (GPIO pin 4 alternate function 1, which is GPCLK0)
+    ACCESS(peripheralsBase_, GPIO_BASE) = (ACCESS(peripheralsBase_, GPIO_BASE) & 0xFFFF8FFF) | (0x01 << 14);
+
+    // This enables all 3...
+    //ACCESS(peripherals_, GPIO_BASE) = (ACCESS(peripherals_, GPIO_BASE) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
+
+    // Set up the clock manager
+    // PASSWD (0x5A << 24)  // required
+    // MASH (0x01 << 9)  // 1-stage mash filter
+    // ENAB (0x01 << 4) // enable the clock
+    // SRC (0x06)  // 6 = PLLD per  (runs at 500 MHz)
+    ACCESS(peripheralsBase_, CLK0_BASE) =
+            (0x5A << 24) |
+            (0x01 << 9) |
+            (0x01 << 4) |
+            0x06;
+
+}
+
 Transmitter::Transmitter()
 {
     peripheralsBase_ = mmapPeripherals();
@@ -298,12 +324,12 @@ void* Transmitter::transmit(void* params)
     // PASSWD (0x5A << 24)  // required
     // MASH (0x01 << 9)  // 1-stage mash filter
     // ENAB (0x01 << 4) // enable the clock
-    // SRC (0x06)  // 6 = PLLD per  (either runs at 400 or 500 MHz)
+    // SRC (0x06)  // 6 = PLLD per  (runs at 500 MHz)
     ACCESS(peripheralsBase_, CLK0_BASE) =
-        (0x5A << 24) |
-        (0x01 << 9) |
-        (0x01 << 4) |
-        0x06;
+            (0x5A << 24) |
+            (0x01 << 9) |
+            (0x01 << 4) |
+            0x06;
 
     frameOffset_ = 0;
 

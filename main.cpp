@@ -35,6 +35,7 @@
 #include "transmitter.h"
 #include <cstdlib>
 #include <csignal>
+#include <plog/Log.h>
 
 using namespace std;
 
@@ -50,6 +51,11 @@ void sigIntHandler(int sigNum)
 
 int main(int argc, char** argv)
 {
+    // PLog documentation at https://github.com/SergiusTheBest/plog
+    static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
+    plog::init(plog::debug, &consoleAppender);
+    //plog::init(plog::debug, "log.txt");
+
     double frequencyMHz = 100.0;
     double spreadMHz = 0.078;
 
@@ -83,10 +89,10 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    cout << "Running with params:" << endl;
-    cout << "frequencyMHz\t" << frequencyMHz << endl;
-    cout << "spreadMHz   \t" << spreadMHz << endl;
-    cout << "filename    \t" << filename << endl;
+    LOG_INFO << "Running with params: ";
+    LOG_INFO << "frequencyMHz\t" << frequencyMHz;
+    LOG_INFO << "spreadMHz   \t" << spreadMHz;
+    LOG_INFO << "filename    \t" << filename;
 
     signal(SIGINT, sigIntHandler);
 
@@ -94,15 +100,15 @@ int main(int argc, char** argv)
         transmitter = Transmitter::getInstance();
 
         AudioFormat* format = Transmitter::getFormat(filename);
-        cout << "Playing: " << ((filename != "-") ? filename : "stdin") << ", "
-             << format->sampleRate << " Hz, "
-             << format->bitsPerSample << " bits, "
-             << ((format->channels > 0x01) ? "stereo" : "mono") << endl;
+        LOG_INFO << "Playing: " << ((filename != "-") ? filename : "stdin") << ", "
+                 << format->sampleRate << " Hz, "
+                 << format->bitsPerSample << " bits, "
+                 << ((format->channels > 0x01) ? "stereo" : "mono") << endl;
         delete format;
 
         transmitter->play(filename, frequencyMHz, spreadMHz, loop);
     } catch (exception &error) {
-        cout << "Error: " << error.what() << endl;
+        LOG_ERROR << "Error: " << error.what();
         return 1;
     }
 
