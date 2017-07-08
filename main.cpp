@@ -36,6 +36,8 @@
 #include <cstdlib>
 #include <csignal>
 #include <plog/Log.h>
+#include <plog/Appenders/ColorConsoleAppender.h>
+
 
 using namespace std;
 

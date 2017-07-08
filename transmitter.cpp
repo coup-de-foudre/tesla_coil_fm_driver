@@ -39,8 +39,6 @@
 #include <unistd.h>
 #include <sys/mman.h>
 
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "TemplateArgumentsIssues"
 using std::ostringstream;
 
 #define STDIN_READ_DELAY 700000
@@ -51,7 +49,7 @@ double Transmitter::spreadMHz_ = 0.0;
 double Transmitter::currentValue_ = 0.0;
 
 bool Transmitter::isTransmitting_ = false;
-unsigned Transmitter::frameOffset_ = 0;
+long long unsigned Transmitter::frameOffset_ = 0;
 vector<float>* Transmitter::buffer_ = NULL;
 void* Transmitter::peripheralsBase_ = NULL;
 
@@ -127,7 +125,7 @@ void* mmapPeripherals() {
     }
 
     void* peripheralsBase = mmap(NULL, PERIPHERAL_LENGTH, PROT_READ | PROT_WRITE, MAP_SHARED, memFd,
-                             isBcm2835() ? BCM2835_PERIPHERAL_BASE : PERIPHERAL_BASE);
+                             isBcm2835() ? BCM2835_PERIPHERAL_BASE : DEFAULT_PERIPHERAL_BASE);
     close(memFd);
     if (peripheralsBase == MAP_FAILED) {
         throw ErrorReporter("Cannot obtain access to peripherals_ (mmap error)");
@@ -137,24 +135,26 @@ void* mmapPeripherals() {
 }
 
 
-void startTransmitter() {
-
-    // TODO: Store current value in the GPIO_BASE
-
+void Transmitter::initClock() {
     // TODO: Reset clock divisor to safe value
 
+
+    //Store current value in the GPFSEL0
+    unsigned gpfSel0PreviousState_ = ACCESS(peripheralsBase_, GPFSEL0);
+
+
     // Clear GPFSEL0 bits 12, 13, 14 and set bit 14 (GPIO pin 4 alternate function 1, which is GPCLK0)
-    ACCESS(peripheralsBase_, GPIO_BASE) = (ACCESS(peripheralsBase_, GPIO_BASE) & 0xFFFF8FFF) | (0x01 << 14);
+    ACCESS(peripheralsBase_, GPFSEL0) = (ACCESS(peripheralsBase_, GPFSEL0) & 0xFFFF8FFF) | (0x01 << 14);
 
     // This enables all 3...
-    //ACCESS(peripherals_, GPIO_BASE) = (ACCESS(peripherals_, GPIO_BASE) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
+    //ACCESS(peripherals_, GPFSEL0) = (ACCESS(peripherals_, GPFSEL0) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
 
     // Set up the clock manager
     // PASSWD (0x5A << 24)  // required
     // MASH (0x01 << 9)  // 1-stage mash filter
     // ENAB (0x01 << 4) // enable the clock
     // SRC (0x06)  // 6 = PLLD per  (runs at 500 MHz)
-    ACCESS(peripheralsBase_, CLK0_BASE) =
+    ACCESS(peripheralsBase_, CM_GP0CTL) =
             (0x5A << 24) |
             (0x01 << 9) |
             (0x01 << 4) |
@@ -191,7 +191,7 @@ void Transmitter::setTransmitValue(double value){
     } else {
         clockDivisor = (unsigned) (divisor * 4096.0 + 0.5);
     }
-    ACCESS(peripheralsBase_, CLK0DIV_BASE) = PASSWORD | (0x00FFFFFF & clockDivisor) ;
+    ACCESS(peripheralsBase_, CM_GP0DIV) = CM_PASSWD | (0x00FFFFFF & clockDivisor) ;
 }
 
 // Set the center frequency and update the transmission
@@ -315,17 +315,17 @@ void* Transmitter::transmit(void* params)
     // Set up clock and peripherals
 
     // Clear GPFSEL0 bits 12, 13, 14 and set bit 14 (GPIO pin 4 alternate function 1, which is GPCLK0)
-    ACCESS(peripheralsBase_, GPIO_BASE) = (ACCESS(peripheralsBase_, GPIO_BASE) & 0xFFFF8FFF) | (0x01 << 14);
+    ACCESS(peripheralsBase_, GPFSEL0) = (ACCESS(peripheralsBase_, GPFSEL0) & 0xFFFF8FFF) | (0x01 << 14);
 
     // This enables all 3...
-    //ACCESS(peripherals_, GPIO_BASE) = (ACCESS(peripherals_, GPIO_BASE) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
+    //ACCESS(peripherals_, GPFSEL0) = (ACCESS(peripherals_, GPFSEL0) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
 
     // Set up the clock manager
     // PASSWD (0x5A << 24)  // required
     // MASH (0x01 << 9)  // 1-stage mash filter
     // ENAB (0x01 << 4) // enable the clock
     // SRC (0x06)  // 6 = PLLD per  (runs at 500 MHz)
-    ACCESS(peripheralsBase_, CLK0_BASE) =
+    ACCESS(peripheralsBase_, CM_GP0CTL) =
             (0x5A << 24) |
             (0x01 << 9) |
             (0x01 << 4) |
@@ -334,14 +334,14 @@ void* Transmitter::transmit(void* params)
     frameOffset_ = 0;
 
     // playbackStartMicroseconds = current clock timer
-    playbackStartMicroseconds = ACCESS64(peripheralsBase_, TCNT_BASE);
+    playbackStartMicroseconds = ACCESS64(peripheralsBase_, ST_CLO);
     currentMicroseconds = playbackStartMicroseconds;
     startMicroseconds = playbackStartMicroseconds;
 
     while (isTransmitting_) {
         while ((buffer_ == NULL) && isTransmitting_) {
             usleep(1);
-            currentMicroseconds = ACCESS64(peripheralsBase_, TCNT_BASE);
+            currentMicroseconds = ACCESS64(peripheralsBase_, ST_CLO);
         }
         if (!isTransmitting_) {
             break;
@@ -371,13 +371,13 @@ void* Transmitter::transmit(void* params)
 
             while (temp >= offset) {
                 asm("nop");  // Super tight timing loop will run CPU at full blast
-                currentMicroseconds = ACCESS64(peripheralsBase_, TCNT_BASE);
+                currentMicroseconds = ACCESS64(peripheralsBase_, ST_CLO);
 
                 offset = ((currentMicroseconds - startMicroseconds) * (sampleRate)) / 1000000;
             }
         }
 
-        startMicroseconds = ACCESS64(peripheralsBase_, TCNT_BASE);
+        startMicroseconds = ACCESS64(peripheralsBase_, ST_CLO);
         delete frames;
     }
 
@@ -410,5 +410,3 @@ void Transmitter::stop()
     doStop = true;
 }
 
-#pragma clang diagnostic pop
-#pragma clang diagnostic pop

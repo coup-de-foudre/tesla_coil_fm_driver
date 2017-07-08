@@ -75,6 +75,8 @@ private:
     void setCenterFreqMHz(double centerFreqMHz);
 
     void setSpreadMHz(double spreadMHz);
+
+    void initClock();
 };
 
 #endif // TRANSMITTER_H

@@ -34,6 +34,7 @@
 #include "wave_reader.h"
 #include "error_reporter.h"
 #include <sstream>
+#include <string.h>
 
 using std::ostringstream;
 using std::exception;
