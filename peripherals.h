@@ -9,13 +9,14 @@
 /**
  *  Base (physical) addresses for peripherals
  */
-#define DEFAULT_PERIPHERAL_BASE 0x3F000000
-
-// The BCM2835 has a different base
-#define BCM2835_PERIPHERAL_BASE  0x20000000
+#ifdef __BCM2835__
+#define PERIPHERALS_BASE 0x20000000
+#else
+#define PERIPHERALS_BASE 0x3F000000
+#endif
 
 // Total size of the peripherals registers
-#define PERIPHERAL_LENGTH 0x002FFFFF
+#define PERIPHERALS_LENGTH 0x002FFFFF
 
 
 /**
@@ -93,6 +94,11 @@
 
 // Clock-manger password required to write registers
 #define CM_PASSWD 0x5A000000
+
+// Available clock frequencies
+#define PLLA_FREQ_MHZ 650.0
+#define PLLC_FREQ_MHZ 200.0
+#define PLLD_FREQ_MHZ 500.0
 
 
 /**

@@ -46,7 +46,8 @@ Transmitter* transmitter = NULL;
 void sigIntHandler(int sigNum)
 {
     if (transmitter != NULL) {
-        cout << "Stopping..." << endl;
+        LOG_INFO << "Stopping...";
+        // TODO: Soft stop
         transmitter->stop();
     }
 }
@@ -105,7 +106,7 @@ int main(int argc, char** argv)
         LOG_INFO << "Playing: " << ((filename != "-") ? filename : "stdin") << ", "
                  << format->sampleRate << " Hz, "
                  << format->bitsPerSample << " bits, "
-                 << ((format->channels > 0x01) ? "stereo" : "mono") << endl;
+                 << ((format->channels > 0x01) ? "stereo" : "mono");
         delete format;
 
         transmitter->play(filename, frequencyMHz, spreadMHz, loop);

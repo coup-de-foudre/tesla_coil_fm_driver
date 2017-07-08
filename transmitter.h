@@ -62,15 +62,16 @@ private:
 
     static void setTransmitValue(double value);
     static void* transmit(void* params);
-
-    static void* peripheralsBase_;
     static vector<float>* buffer_;
     static unsigned long long frameOffset_;
     static bool isTransmitting_;
     static double centerFreqMHz_;
     static double spreadMHz_;
     static double currentValue_;
-    static const double clockFreqMHz_ = 500.0;
+    static void* mmapPeripherals_;
+
+    static unsigned clkShutdownHard();
+    static void clkFreqSet(double targetFreqMHz);
 
     void setCenterFreqMHz(double centerFreqMHz);
 
