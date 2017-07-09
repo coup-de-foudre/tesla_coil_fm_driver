@@ -46,7 +46,7 @@ using std::ostringstream;
 
 #define STDIN_READ_DELAY 700000
 
-#define HEXSTREAM(X) "0x" << std::setfill('0') << std::setw(8) << std::hex << X
+#define HEX_STREAM(X) "0x" << std::setfill('0') << std::setw(8) << std::hex << X
 
 
 double Transmitter::centerFreqMHz_ = 0.0;
@@ -57,6 +57,8 @@ bool Transmitter::isTransmitting_ = false;
 long long unsigned Transmitter::frameOffset_ = 0;
 vector<float>* Transmitter::buffer_ = NULL;
 void* Transmitter::mmapPeripherals_ = NULL;
+
+unsigned Transmitter::clockOffsetAddr_ = CM_GP0CTL;
 
 /*
  * Code flow plan:
@@ -122,22 +124,19 @@ void* mmapPeripherals() {
 
 
 /**
- * Shutdown the clock
+ * Hard shutdown of the clock
  *
- * Returns the initial clock manager state
+ * Returns the initial clock manager state.
  */
 unsigned Transmitter::clkShutdownHard() {
-    // Hard-shutdown clock
-
-    unsigned cmCtl = CM_GP0CTL;
-
-    LOG_DEBUG << "Initiating hard shutdown of clock at " << HEXSTREAM(cmCtl);
+    LOG_DEBUG << "Hard shutdown of clock " << HEX_STREAM(clockOffsetAddr_);
 
     // Disable clock and wait for it to become available
-    unsigned cmCtlInitialState = ACCESS(mmapPeripherals_, cmCtl);
-    ACCESS(mmapPeripherals_, cmCtl) = (cmCtlInitialState & 0x00FFFFEF) | CM_PASSWD;
+    unsigned cmCtlInitialState = ACCESS(mmapPeripherals_, clockOffsetAddr_);
+    ACCESS(mmapPeripherals_, clockOffsetAddr_) = (cmCtlInitialState & 0x00FFFFEF) | CM_PASSWD;
     while (true) {
-        volatile bool enabledOrBusy = ACCESS(mmapPeripherals_, cmCtl) & (0x01 << 4 | 0x01 << 7);
+        volatile bool enabledOrBusy =
+            ACCESS(mmapPeripherals_, clockOffsetAddr_) & (0x01 << 4 | 0x01 << 7);
         if (!enabledOrBusy) {
             LOG_DEBUG << "Clock shutdown complete";
             break;
@@ -149,10 +148,27 @@ unsigned Transmitter::clkShutdownHard() {
 
 
 /**
- * Hard init the clock
+ * Hard init of the clock
+ *
+ * Returns the clock divisor.
  */
-unsigned clkInitHard(void* peripheralsBase, unsigned cmCtl, double frequencyMHz) {
-    return 0; // TODO
+unsigned Transmitter::clkInitHard(double freqMHz, bool shutdown=true) {
+    if (shutdown) clkShutdownHard();
+
+    LOG_DEBUG << "Hard-init of clock " << HEX_STREAM(clockOffsetAddr_)
+              << " at frequency " << freqMHz << " MHz";
+
+    unsigned clkDivisor = clkDivisorSet(freqMHz);
+
+    // Set GPIO pin 4 alternate function 1 (GPCLK0)
+    ACCESS(mmapPeripherals_, GPFSEL0) =
+        (ACCESS(mmapPeripherals_, GPFSEL0) & 0xFFFF8FFF) | (0x01 << 14);
+
+    // Set up the clock manager
+    ACCESS(mmapPeripherals_, CM_GP0CTL) =
+        CM_PASSWD | CM_MASH1 | CM_ENAB | CM_SRC_PLLD;
+
+    return clkDivisor;
 }
 
 
@@ -164,10 +180,11 @@ unsigned clkStartSoft(double finalFreqMHz, double startFreqMHz, unsigned slewTim
 }
 
 /**
- * Set the clock frequency
+ * Set the clock divisor from a given frequency
  *
+ * Returns the new clock divisor.
  */
-void Transmitter::clkFreqSet(double targetFreqMHz) {
+unsigned Transmitter::clkDivisorSet(double targetFreqMHz) {
     double divisor = PLLD_FREQ_MHZ / targetFreqMHz;
     unsigned clockDivisor;
     if (divisor <= 0.0) {
@@ -178,6 +195,8 @@ void Transmitter::clkFreqSet(double targetFreqMHz) {
         clockDivisor = (unsigned) (divisor * 4096.0 + 0.5);
     }
     ACCESS(mmapPeripherals_, CM_GP0DIV) = CM_PASSWD | (0x00FFFFFF & clockDivisor);
+
+    return clockDivisor;
 }
 
 /**
@@ -191,7 +210,7 @@ void Transmitter::clkFreqSet(double targetFreqMHz) {
 //     // Set GPIO pin 4 alternate function 0 (GPCLK0): Clear bits 12 and 13, and set bit 14
 //     unsigned gpfSel0InitialState_ = ACCESS(mmapPeripherals_, GPFSEL0);
 //     ACCESS(mmapPeripherals_, GPFSEL0) = (gpfSel0InitialState_ & 0xFFFF8FFF) | (0x01 << 14);
-//     LOG_DEBUG << "Initial GPFSEL0 state: " << HEXSTREAM(gpfSel0InitialState_);
+//     LOG_DEBUG << "Initial GPFSEL0 state: " << HEX_STREAM(gpfSel0InitialState_);
 
 
 //     // Set up the clock manager
@@ -207,7 +226,7 @@ void Transmitter::clkFreqSet(double targetFreqMHz) {
 
 //     // TODO: Reset clock divisor to safe value?
 //     unsigned cmGp0DivPreviousState_ = ACCESS(mmapPeripherals_, CM_GP0DIV);
-//     LOGD << "Initial CM_GP0DIV state: " << HEXSTREAM(cmGp0DivPreviousState_);
+//     LOGD << "Initial CM_GP0DIV state: " << HEX_STREAM(cmGp0DivPreviousState_);
 
 
 //     // This enables all 3...
@@ -237,7 +256,7 @@ Transmitter* Transmitter::getInstance()
 void Transmitter::setTransmitValue(double value){
     currentValue_ = value;
     double targetFreqMHz = (spreadMHz_ * value + centerFreqMHz_);
-    clkFreqSet(targetFreqMHz);
+    clkDivisorSet(targetFreqMHz);
 }
 
 // Set the center frequency and update the transmission
@@ -361,26 +380,9 @@ void* Transmitter::transmit(void* params)
     double value;
     float* data;
     unsigned sampleRate = *(unsigned*)(params);
+    clkInitHard(centerFreqMHz_);
 
     // Set up clock and peripherals
-
-    // Clear GPFSEL0 bits 12, 13, 14 and set bit 14 (GPIO pin 4 alternate function 1, which is GPCLK0)
-    ACCESS(mmapPeripherals_, GPFSEL0) = (ACCESS(mmapPeripherals_, GPFSEL0) & 0xFFFF8FFF) | (0x01 << 14);
-
-    // This enables all 3...
-    //ACCESS(peripherals_, GPFSEL0) = (ACCESS(peripherals_, GPFSEL0) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
-
-    // Set up the clock manager
-    // PASSWD (0x5A << 24)  // required
-    // MASH (0x01 << 9)  // 1-stage mash filter
-    // ENAB (0x01 << 4) // enable the clock
-    // SRC (0x06)  // 6 = PLLD per  (runs at 500 MHz)
-    ACCESS(mmapPeripherals_, CM_GP0CTL) =
-            (0x5A << 24) |
-            (0x01 << 9) |
-            (0x01 << 4) |
-            0x06;
-
     frameOffset_ = 0;
 
     // playbackStartMicroseconds = current clock timer

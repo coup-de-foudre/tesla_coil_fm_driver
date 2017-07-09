@@ -44,9 +44,11 @@ using std::vector;
 
 using std::string;
 
-class Transmitter
-{
-public:
+class Transmitter {
+    // TODO remove statics and create singleton:
+    // https://stackoverflow.com/questions/1008019/c-singleton-design-pattern
+
+ public:
     virtual ~Transmitter();
 
     void play(string filename, double frequencyMHz, double spreadMHz, bool loop);
@@ -62,6 +64,14 @@ private:
 
     static void setTransmitValue(double value);
     static void* transmit(void* params);
+
+    static unsigned clkShutdownHard();
+    static unsigned clkInitHard(double freqMHz, bool shutdown);
+    static unsigned clkDivisorSet(double targetFreqMHz);
+    void setCenterFreqMHz(double centerFreqMHz);
+    void setSpreadMHz(double spreadMHz);
+    void initClock();
+
     static vector<float>* buffer_;
     static unsigned long long frameOffset_;
     static bool isTransmitting_;
@@ -69,15 +79,8 @@ private:
     static double spreadMHz_;
     static double currentValue_;
     static void* mmapPeripherals_;
+    static unsigned clockOffsetAddr_;
 
-    static unsigned clkShutdownHard();
-    static void clkFreqSet(double targetFreqMHz);
-
-    void setCenterFreqMHz(double centerFreqMHz);
-
-    void setSpreadMHz(double spreadMHz);
-
-    void initClock();
 };
 
 #endif // TRANSMITTER_H

@@ -92,10 +92,37 @@
 #define CM_GP1DIV 0x0010107c
 #define CM_GP2DIV 0x00101084
 
-// Clock-manger password required to write registers
+// Clock-manger password (required to write to *CTL and *DIV)
 #define CM_PASSWD 0x5A000000
 
-// Available clock frequencies
+// Clock MASH filters
+#define CM_MASH1 (0x01 << 9)
+#define CM_MASH2 (0x02 << 9)
+#define CM_MASH3 (0x03 << 9)
+
+// Clock output flip (test/debug only)
+#define CM_FLIP (0x01 << 8)
+
+// Clock manageer busy
+#define CM_BUSY (0x01 << 7)
+
+// Clock generator kill (test/debug only)
+#define CM_KILL (0x01 << 5)
+
+// Clock manager enable
+#define CM_ENAB (0x01 << 4)
+
+// Clock manager clock set
+#define CM_SRC_GND (0x00)
+#define CM_SRC_OSC (0x01)
+#define CM_SRC_TST0 (0x02)  // test/debug only
+#define CM_SRC_TST1 (0x01)  // test/debug only
+#define CM_SRC_PLLA (0x04)
+#define CM_SRC_PLLC (0x05)
+#define CM_SRC_PLLD (0x06)
+#define CM_SRC_HDMI (0x07)
+
+// Clock frequencies
 #define PLLA_FREQ_MHZ 650.0
 #define PLLC_FREQ_MHZ 200.0
 #define PLLD_FREQ_MHZ 500.0
