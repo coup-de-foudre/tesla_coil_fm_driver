@@ -100,29 +100,6 @@ void* Transmitter::mmapPeripherals_ = NULL;
  *    -
  */
 
-
-bool isBcm2835() {
-    bool bcm2835Flag = true;
-
-    FILE* pipe = popen("uname -m", "r");
-    if (pipe) {
-        char inputBuffer[64];
-        string machine = "";
-        while (!feof(pipe)) {
-            if (fgets(inputBuffer, 64, pipe)) {
-                machine += inputBuffer;
-            }
-        }
-        pclose(pipe);
-
-        machine = machine.substr(0, machine.length() - 1);
-        if (machine != "armv6l") {
-            bcm2835Flag = false;
-        }
-    }
-    return bcm2835Flag;
-}
-
 void* mmapPeripherals() {
     LOG_DEBUG << "Memory mapping peripherals";
 
@@ -158,7 +135,7 @@ unsigned Transmitter::clkShutdownHard() {
 
     // Disable clock and wait for it to become available
     unsigned cmCtlInitialState = ACCESS(mmapPeripherals_, cmCtl);
-    ACCESS(PERIPHERALS_BASE, cmCtl) = (cmCtlInitialState & 0x00FFFFEF) | CM_PASSWD;
+    ACCESS(mmapPeripherals_, cmCtl) = (cmCtlInitialState & 0x00FFFFEF) | CM_PASSWD;
     while (true) {
         volatile bool enabledOrBusy = ACCESS(mmapPeripherals_, cmCtl) & (0x01 << 4 | 0x01 << 7);
         if (!enabledOrBusy) {
@@ -313,13 +290,10 @@ void Transmitter::play(string filename,
     pthread_t thread;
 
     void* params = (void*)&format->sampleRate;
-    LOG_DEBUG << "HERE";
     int returnCode = pthread_create(&thread, NULL, &Transmitter::transmit, params);
     usleep(100); // DEBUGGING
-    LOG_DEBUG << "HERE";
 
     if (returnCode) {
-        LOG_DEBUG << "HERE";
 
         if (!readStdin) {
             delete waveReader;
@@ -329,7 +303,6 @@ void Transmitter::play(string filename,
         oss << "Cannot create new thread (code: " << returnCode << ")";
         throw ErrorReporter(oss.str());
     }
-    LOG_DEBUG << "HERE";
 
     usleep(BUFFER_TIME / 2);
 
@@ -389,14 +362,10 @@ void* Transmitter::transmit(void* params)
     float* data;
     unsigned sampleRate = *(unsigned*)(params);
 
-    LOG_DEBUG << "HERE";
-
     // Set up clock and peripherals
 
     // Clear GPFSEL0 bits 12, 13, 14 and set bit 14 (GPIO pin 4 alternate function 1, which is GPCLK0)
     ACCESS(mmapPeripherals_, GPFSEL0) = (ACCESS(mmapPeripherals_, GPFSEL0) & 0xFFFF8FFF) | (0x01 << 14);
-
-    LOG_DEBUG << "HERE";
 
     // This enables all 3...
     //ACCESS(peripherals_, GPFSEL0) = (ACCESS(peripherals_, GPFSEL0) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
@@ -418,8 +387,6 @@ void* Transmitter::transmit(void* params)
     playbackStartMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
     currentMicroseconds = playbackStartMicroseconds;
     startMicroseconds = playbackStartMicroseconds;
-    LOG_DEBUG << "HERE";
-
     while (isTransmitting_) {
         while ((buffer_ == NULL) && isTransmitting_) {
             usleep(1);
