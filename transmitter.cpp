@@ -60,6 +60,14 @@ void* Transmitter::mmapPeripherals_ = NULL;
 
 unsigned Transmitter::clockOffsetAddr_ = CM_GP0CTL;
 
+// TODO: Not hard coded?
+const double softOffDifferenceMHz_ = 0.250; // 250kHz off the center is "soft off"
+const unsigned slewTimeMicroseconds_ = 1000000; // 1 second on/off slew
+
+// Pause between frequency updates to avoid overloading the clock manager
+const unsigned updateDelayMicroseconds_ = 10; // 100 kHz updates
+
+
 /*
  * Code flow plan:
  *
@@ -67,7 +75,7 @@ unsigned Transmitter::clockOffsetAddr_ = CM_GP0CTL;
  *    - Current:
  *        - memory map peripherals
  *    - Should:
- *        - memory map peripherals,
+ *        x memory map peripherals,
  *        - safely start the clock
  *             :: disable clock
  *             :: set divisor safely before start
@@ -102,7 +110,7 @@ unsigned Transmitter::clockOffsetAddr_ = CM_GP0CTL;
  *    -
  */
 
-void* mmapPeripherals() {
+inline void* mmapPeripherals() {
     LOG_DEBUG << "Memory mapping peripherals";
 
     int memFd;
@@ -122,11 +130,65 @@ void* mmapPeripherals() {
     return peripheralsBase;
 }
 
+Transmitter::Transmitter()
+{
+    LOG_DEBUG << "Initializing transmitter";
+    mmapPeripherals_ = mmapPeripherals();
+    // TODO soft-start
+}
+
+Transmitter::~Transmitter()
+{
+    LOG_DEBUG << "Deleting transmitter";
+    munmap((void*)mmapPeripherals_, PERIPHERALS_LENGTH);
+    // TODO: Reset the GPIO
+}
+
+Transmitter* Transmitter::getInstance()
+{
+    static Transmitter instance;
+    return &instance;
+}
+
+
+
+/**
+ * Slew clock from one frequency to another
+ *
+ * Return the final clock divisor
+ */
+unsigned Transmitter::clkSlew(double finalFreqMHz,
+                              double startFreqMHz,
+                              double slewTimeMicroseconds) {
+
+    LOG_DEBUG << "Clock slew: finalFreqMHz=" << finalFreqMHz
+              << ", startFreqMHz=" << startFreqMHz
+              << ", slewTimeMicroseconds=" << (double)slewTimeMicroseconds;
+
+    volatile unsigned long long startMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+    volatile unsigned long long currentMicroseconds = startMicroseconds;
+
+    while (true) {
+        if (slewTimeMicroseconds < currentMicroseconds - startMicroseconds) {
+            break;
+        }
+        usleep(updateDelayMicroseconds_);
+        currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+        double targetFreqMHz = startFreqMHz +
+            ((double)(currentMicroseconds - startMicroseconds) / (double)(slewTimeMicroseconds)) *
+            (finalFreqMHz - startFreqMHz);
+        clkDivisorSet(targetFreqMHz);
+    }
+
+    // Final update to target frequency
+    usleep(updateDelayMicroseconds_);
+    return clkDivisorSet(finalFreqMHz);
+}
 
 /**
  * Hard shutdown of the clock
  *
- * Returns the initial clock manager state.
+ * Returns the clock manager state prior to shutdown
  */
 unsigned Transmitter::clkShutdownHard() {
     LOG_DEBUG << "Hard shutdown of clock " << HEX_STREAM(clockOffsetAddr_);
@@ -152,11 +214,10 @@ unsigned Transmitter::clkShutdownHard() {
  *
  * Returns the clock divisor.
  */
-unsigned Transmitter::clkInitHard(double freqMHz, bool shutdown=true) {
-    if (shutdown) clkShutdownHard();
-
+unsigned Transmitter::clkInitHard(double freqMHz) {
     LOG_DEBUG << "Hard-init of clock " << HEX_STREAM(clockOffsetAddr_)
-              << " at frequency " << freqMHz << " MHz";
+              << " to frequency " << freqMHz << " MHz";
+    clkShutdownHard();
 
     unsigned clkDivisor = clkDivisorSet(freqMHz);
 
@@ -171,13 +232,30 @@ unsigned Transmitter::clkInitHard(double freqMHz, bool shutdown=true) {
     return clkDivisor;
 }
 
+/**
+ * Soft shutdown of the clock
+ *
+ * Returns the state of the clock manager prior to shutdown
+ */
+unsigned Transmitter::clkShutdownSoft() {
+    LOG_DEBUG << "Soft shutdown of clock";
+    clkSlew(centerFreqMHz_ + softOffDifferenceMHz_, centerFreqMHz_, slewTimeMicroseconds_);
+    return clkShutdownHard();
+}
+
 
 /**
- * Soft-start the clock
+ * Soft init of the clock
+ *
+ * Returns final clock divisor.
  */
-unsigned clkStartSoft(double finalFreqMHz, double startFreqMHz, unsigned slewTimeMs) {
-    return 0; // TODO
+unsigned Transmitter::clkInitSoft() {
+    LOG_DEBUG << "Starting soft-init of clock to " << centerFreqMHz_ << " MHz";
+    double startFreqMHz =  centerFreqMHz_ + softOffDifferenceMHz_;
+    clkInitHard(startFreqMHz);
+    return clkSlew(centerFreqMHz_,  centerFreqMHz_ + softOffDifferenceMHz_, slewTimeMicroseconds_);
 }
+
 
 /**
  * Set the clock divisor from a given frequency
@@ -199,58 +277,6 @@ unsigned Transmitter::clkDivisorSet(double targetFreqMHz) {
     return clockDivisor;
 }
 
-/**
- * Safely initialize the clock on GPIO pin 4
- */
-// void Transmitter::initClock() {
-//     LOG_INFO << "Initializing clock";
-
-//     clkShutdownHard(CM_GP0CTL); // TODO save initial state?
-
-//     // Set GPIO pin 4 alternate function 0 (GPCLK0): Clear bits 12 and 13, and set bit 14
-//     unsigned gpfSel0InitialState_ = ACCESS(mmapPeripherals_, GPFSEL0);
-//     ACCESS(mmapPeripherals_, GPFSEL0) = (gpfSel0InitialState_ & 0xFFFF8FFF) | (0x01 << 14);
-//     LOG_DEBUG << "Initial GPFSEL0 state: " << HEX_STREAM(gpfSel0InitialState_);
-
-
-//     // Set up the clock manager
-//     // PASSWD (0x5A << 24)  // required
-//     // MASH (0x01 << 9)  // 1-stage mash filter
-//     // ENAB (0x01 << 4) // enable the clock
-//     // SRC (0x06)  // 6 = PLLD per  (runs at 500 MHz)
-//     ACCESS(mmapPeripherals_, CM_GP0CTL) =
-//         (0x5A << 24) |
-//         (0x01 << 9) |
-//         (0x01 << 4) |
-//         0x06;
-
-//     // TODO: Reset clock divisor to safe value?
-//     unsigned cmGp0DivPreviousState_ = ACCESS(mmapPeripherals_, CM_GP0DIV);
-//     LOGD << "Initial CM_GP0DIV state: " << HEX_STREAM(cmGp0DivPreviousState_);
-
-
-//     // This enables all 3...
-//     //ACCESS(peripherals_, GPFSEL0) = (ACCESS(peripherals_, GPFSEL0) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
-// }
-
-Transmitter::Transmitter()
-{
-    LOG_DEBUG << "Initializing transmitter";
-    mmapPeripherals_ = mmapPeripherals();
-    // TODO soft-start
-}
-
-Transmitter::~Transmitter()
-{
-    munmap((void*)mmapPeripherals_, PERIPHERALS_LENGTH);
-    // TODO: Reset the GPIO
-}
-
-Transmitter* Transmitter::getInstance()
-{
-    static Transmitter instance;
-    return &instance;
-}
 
 // Set the transmit frequency offset from the current spreadFreqMHz and centerFreqMHz
 void Transmitter::setTransmitValue(double value){
@@ -307,7 +333,6 @@ void Transmitter::play(string filename,
     buffer_ = (!readStdin) ? waveReader->getFrames(bufferFrames, 0) : stdinReader->getFrames(bufferFrames, doStop);
 
     pthread_t thread;
-
     void* params = (void*)&format->sampleRate;
     int returnCode = pthread_create(&thread, NULL, &Transmitter::transmit, params);
     usleep(100); // DEBUGGING
@@ -380,7 +405,9 @@ void* Transmitter::transmit(void* params)
     double value;
     float* data;
     unsigned sampleRate = *(unsigned*)(params);
-    clkInitHard(centerFreqMHz_);
+
+    // Hard-code 250kHz preamble over 1 second
+    clkInitSoft();
 
     // Set up clock and peripherals
     frameOffset_ = 0;
@@ -458,9 +485,7 @@ AudioFormat* Transmitter::getFormat(string filename)
 
 void Transmitter::stop()
 {
-    // TODO: Soft shutdown
-
     doStop = true;
-    clkShutdownHard();
+    clkShutdownSoft(); // TODO: Transmit lock?
 }
 

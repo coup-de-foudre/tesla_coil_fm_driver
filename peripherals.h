@@ -1,10 +1,5 @@
-//
-// Created by Michael B. McCoy on 7/4/17.
-//
-
 #ifndef FM_TRANSMITTER_PERIPHERALS_H
 #define FM_TRANSMITTER_PERIPHERALS_H
-
 
 /**
  *  Base (physical) addresses for peripherals
@@ -143,5 +138,6 @@
 
 #define ACCESS(base, offset) *(volatile unsigned*)((int)base + offset)
 #define ACCESS64(base, offset) *(volatile unsigned long long*)((int)base + offset)
+
 
 #endif //FM_TRANSMITTER_PERIPHERALS_H

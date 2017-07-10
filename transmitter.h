@@ -65,8 +65,15 @@ private:
     static void setTransmitValue(double value);
     static void* transmit(void* params);
 
+    static unsigned clkSlew(double finalFreqMHz,
+                            double startFreqMHz,
+                            double slewTimeMicroseconds);
     static unsigned clkShutdownHard();
-    static unsigned clkInitHard(double freqMHz, bool shutdown);
+    static unsigned clkShutdownSoft();
+
+    static unsigned clkInitHard(double freqMHz);
+    static unsigned clkInitSoft();
+
     static unsigned clkDivisorSet(double targetFreqMHz);
     void setCenterFreqMHz(double centerFreqMHz);
     void setSpreadMHz(double spreadMHz);
