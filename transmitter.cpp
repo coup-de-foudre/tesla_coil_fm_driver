@@ -40,6 +40,9 @@
 #include <sys/mman.h>
 #include <plog/Log.h>
 
+#include <thread>
+
+
 #include <iostream>
 
 using std::ostringstream;
@@ -134,7 +137,7 @@ Transmitter::Transmitter()
 {
     LOG_DEBUG << "Initializing transmitter";
     mmapPeripherals_ = mmapPeripherals();
-    // TODO soft-start
+    clkInitSoft();
 }
 
 Transmitter::~Transmitter()
@@ -334,6 +337,8 @@ void Transmitter::play(string filename,
 
     pthread_t thread;
     void* params = (void*)&format->sampleRate;
+    //std::thread activeThread (format->sampleRate);
+
     int returnCode = pthread_create(&thread, NULL, &Transmitter::transmit, params);
     usleep(100); // DEBUGGING
 
@@ -405,9 +410,6 @@ void* Transmitter::transmit(void* params)
     double value;
     float* data;
     unsigned sampleRate = *(unsigned*)(params);
-
-    // Hard-code 250kHz preamble over 1 second
-    clkInitSoft();
 
     // Set up clock and peripherals
     frameOffset_ = 0;
