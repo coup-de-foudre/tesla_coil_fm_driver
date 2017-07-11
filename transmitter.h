@@ -63,7 +63,7 @@ private:
     bool doStop;
 
     static void setTransmitValue(double value);
-    static void* transmit(void* params);
+    static void* transmit(unsigned sampleRate);
 
     static unsigned clkSlew(double finalFreqMHz,
                             double startFreqMHz,

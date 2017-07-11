@@ -137,7 +137,6 @@ Transmitter::Transmitter()
 {
     LOG_DEBUG << "Initializing transmitter";
     mmapPeripherals_ = mmapPeripherals();
-    clkInitSoft();
 }
 
 Transmitter::~Transmitter()
@@ -281,30 +280,45 @@ unsigned Transmitter::clkDivisorSet(double targetFreqMHz) {
 }
 
 
-// Set the transmit frequency offset from the current spreadFreqMHz and centerFreqMHz
+/**
+ * Set the transmit frequency offset from the current spreadFreqMHz and centerFreqMHz
+ */
 void Transmitter::setTransmitValue(double value){
     currentValue_ = value;
     double targetFreqMHz = (spreadMHz_ * value + centerFreqMHz_);
     clkDivisorSet(targetFreqMHz);
 }
 
-// Set the center frequency and update the transmission
+
+/**
+ * Set the center frequency and update the transmission
+ */
 void Transmitter::setCenterFreqMHz(double centerFreqMHz) {
     centerFreqMHz_ = centerFreqMHz;
     return setTransmitValue(currentValue_);
 }
 
-// Set the spread and update the transmission
+
+/**
+ * Set the spread and update the transmission
+ */
 void Transmitter::setSpreadMHz(double spreadMHz) {
     spreadMHz_ = spreadMHz;
     return setTransmitValue(currentValue_);
 }
 
+/**
+ * Play from stdin or a file
+ */
 void Transmitter::play(string filename,
                        double centerFreqMHz,
                        double spreadMHz,
                        bool loop)
 {
+    LOG_DEBUG << "Playing: filename=" << filename
+              << ", centerFreqMHz=" << centerFreqMHz
+              << ", spreadMHz=" << spreadMHz
+              << ", loop=" << loop;
 
     if (isTransmitting_) {
         LOG_ERROR << "Cannot play, transmitter already in use";
@@ -327,6 +341,7 @@ void Transmitter::play(string filename,
 
     centerFreqMHz_ = centerFreqMHz;
     spreadMHz_ = spreadMHz;
+    clkInitSoft();
 
     isTransmitting_ = true;
     doStop = false;
@@ -335,23 +350,7 @@ void Transmitter::play(string filename,
 
     buffer_ = (!readStdin) ? waveReader->getFrames(bufferFrames, 0) : stdinReader->getFrames(bufferFrames, doStop);
 
-    pthread_t thread;
-    void* params = (void*)&format->sampleRate;
-    //std::thread activeThread (format->sampleRate);
-
-    int returnCode = pthread_create(&thread, NULL, &Transmitter::transmit, params);
-    usleep(100); // DEBUGGING
-
-    if (returnCode) {
-
-        if (!readStdin) {
-            delete waveReader;
-        }
-        delete format;
-        ostringstream oss;
-        oss << "Cannot create new thread (code: " << returnCode << ")";
-        throw ErrorReporter(oss.str());
-    }
+    std::thread activeThread (Transmitter::transmit, format->sampleRate);
 
     usleep(BUFFER_TIME / 2);
 
@@ -365,34 +364,37 @@ void Transmitter::play(string filename,
                     buffer_ = stdinReader->getFrames(bufferFrames, doStop);
                 }
             }
+            LOG_DEBUG << "Sleeping" ;
             usleep(BUFFER_TIME / 2);
+
+            LOG_DEBUG << "frameOffset_=" << frameOffset_
+                      << ", bufferFrames=" << bufferFrames;
         }
+        LOG_DEBUG << "broke out"
+                  << ": frameOffset_=" << frameOffset_
+                  << ", bufferFrames=" << bufferFrames;
+
         if (loop && !readStdin && !doStop) {
+
+            LOG_DEBUG << "Looping...";
+
             isTransmitting_ = false;
-
-            buffer_ = waveReader->getFrames(bufferFrames, 0);
-
-            pthread_join(thread, NULL);
-
+            activeThread.join();
             isTransmitting_ = true;
 
-            returnCode = pthread_create(&thread, NULL, &Transmitter::transmit, params);
-            if (returnCode) {
-                if (!readStdin) {
-                    delete waveReader;
-                }
-                delete format;
-                ostringstream oss;
-                oss << "Cannot create new thread (code: " << returnCode << ")";
-                throw ErrorReporter(oss.str());
-            }
+            buffer_ = waveReader->getFrames(bufferFrames, 0);
+            frameOffset_ = 0;
+            std::thread newThread (Transmitter::transmit, format->sampleRate);
+            newThread.swap(activeThread);
+
         } else {
             doPlay = false;
         }
     }
     isTransmitting_ = false;
 
-    pthread_join(thread, NULL);
+    //pthread_join(thread, NULL);
+    activeThread.join();
 
     if (!readStdin) {
         delete waveReader;
@@ -400,7 +402,7 @@ void Transmitter::play(string filename,
     delete format;
 }
 
-void* Transmitter::transmit(void* params)
+void* Transmitter::transmit(unsigned sampleRate)
 {
     unsigned long long currentMicroseconds, startMicroseconds, playbackStartMicroseconds;
     unsigned long offset;
@@ -409,9 +411,9 @@ void* Transmitter::transmit(void* params)
     vector<float>* frames = NULL;
     double value;
     float* data;
-    unsigned sampleRate = *(unsigned*)(params);
+    //unsigned sampleRate = *(unsigned*)(params);
 
-    // Set up clock and peripherals
+    LOG_DEBUG << "Starting transmitter with sample rate " << sampleRate;
     frameOffset_ = 0;
 
     // playbackStartMicroseconds = current clock timer
@@ -463,7 +465,7 @@ void* Transmitter::transmit(void* params)
 
     // Reset to zero
     setTransmitValue(0.0);
-
+    LOG_DEBUG << "Trasnmitter shut down";
     return NULL;
 }
 
