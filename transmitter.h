@@ -37,6 +37,8 @@
 #include "error_reporter.h"
 #include "audio_format.h"
 #include <vector>
+#include <thread>
+#include <mutex>
 
 using std::vector;
 
@@ -44,34 +46,51 @@ using std::vector;
 
 using std::string;
 
-class Transmitter
-{
-    public:
-        virtual ~Transmitter();
+class Transmitter {
+    // TODO remove statics and create singleton:
+    // https://stackoverflow.com/questions/1008019/c-singleton-design-pattern
 
-        void play(string filename, double frequencyMHz, double spreadMHz, bool loop);
-        void stop();
+ public:
+    virtual ~Transmitter();
 
-	    static Transmitter* getInstance();
-        static AudioFormat* getFormat(string filename);
+    void play(string filename, double frequencyMHz, double spreadMHz, bool loop);
+    void stop();
 
-    private:
-        Transmitter();
+    static Transmitter* getInstance();
+    static AudioFormat* getFormat(string filename);
 
-        bool doStop;
+private:
+    Transmitter();
 
-        static void setClockDivisor(double value);
-        static void* transmit(void* params);
+    static void setTransmitValue(double value);
+    static void* transmit(unsigned sampleRate);
 
-        static void* peripherals_;
-        static vector<float>* buffer_;
-        static unsigned frameOffset_;
-        static bool isTransmitting_;
-        static double spreadFactor_;
-        static double centerFreqMHz_;
-        static double spreadMHz_;
-        static double currentValue_;
-        static const double clockFreqMHz_ = 500.0;
+    static unsigned clkSlew(double finalFreqMHz,
+                            double startFreqMHz,
+                            double slewTimeMicroseconds);
+    static unsigned clkShutdownHard(bool lock);
+    static unsigned clkShutdownSoft();
+
+    static unsigned clkInitHard(double freqMHz, bool lock);
+    static unsigned clkInitSoft();
+
+    static unsigned clkDivisorSet(double targetFreqMHz);
+    void setCenterFreqMHz(double centerFreqMHz);
+    void setSpreadMHz(double spreadMHz);
+    void initClock();
+
+    static double centerFreqMHz_;
+    static double spreadMHz_;
+    static double currentValue_;
+    static void* mmapPeripherals_;
+    static unsigned clockOffsetAddr_;
+
+    static std::mutex transmitMutex_;
+
+    static vector<float>* buffer_;
+    static unsigned long long frameOffset_;
+    static bool isTransmitting_;
+    static bool doStop;
 
 };
 

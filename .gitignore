@@ -5,3 +5,7 @@ GTAGS
 GRTAGS
 GPATH
 *~
+.idea
+cmake-build-debug
+.#*
+\#*

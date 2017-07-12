@@ -56,7 +56,7 @@ WaveReader::WaveReader(string filename) :
     }
 
     ifs.seekg(0, ifs.end);
-    fileSize = ifs.tellg();
+    fileSize = (unsigned int) ifs.tellg();
     ifs.seekg(0, ifs.beg);
 
     try {
@@ -111,7 +111,7 @@ WaveReader::WaveReader(string filename) :
         throw error;
     }
 
-    dataOffset = ifs.tellg();
+    dataOffset = (unsigned int) ifs.tellg();
 }
 
 WaveReader::~WaveReader()

@@ -1,7 +1,7 @@
 /*
     fm_transmitter - use Raspberry Pi as FM transmitter
 
-    Copyright (c) 2015, Marcin Kondej
+    Copyright (c) 2015, Marcin Kondej, 2017 Mike McCoy
     All rights reserved.
 
     See https://github.com/markondej/fm_transmitter
@@ -34,94 +34,119 @@
 #include "transmitter.h"
 #include "wave_reader.h"
 #include "stdin_reader.h"
-#include <iostream>
+#include "peripherals.h"
 #include <sstream>
-#include <cmath>
-#include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <plog/Log.h>
+#include <thread>
+
+
+#include <iostream>
 
 using std::ostringstream;
 
-// Let's define PERIPHERAL_BASE 0x3F000000
-
-// GPIO Function Select 0 GPFSEL0
-// GPFSEL0 = PERIPHERAL_BASE + GPIO_BASE
-#define GPIO_BASE 0x00200000
-
-// Clock Manager General Purpose Clocks Control CM_GP0CTL
-#define CLK0_BASE 0x00101070
-#define CLK1_BASE 0x00101078
-#define CLK2_BASE 0x00101080
-
-/// Clock Manager General Purpose Clock Divisors CM_GP0DIV
-#define CLK0DIV_BASE 0x00101074
-#define CLK1DIV_BASE 0x0010107c
-#define CLK2DIV_BASE 0x00101084
-
-// The ST system timer which provides a 64-bit system counter
-//   CLO 32-bit lower part of the counter at register 0x7E003004 (virtual)
-//   CHI 32-bit upper part of the counter at register 0x7E003008 (virtual)
-#define TCNT_BASE 0x00003004
-
-// The password for many of the peripherals
-#define PASSWORD 0x5A000000
-
 #define STDIN_READ_DELAY 700000
 
-#define ACCESS(base, offset) *(volatile unsigned*)((int)base + offset)
-#define ACCESS64(base, offset) *(volatile unsigned long long*)((int)base + offset)
-
+#define HEX_STREAM(X) "0x" << std::setfill('0') << std::setw(8) << std::hex << X
 
 
 double Transmitter::centerFreqMHz_ = 0.0;
 double Transmitter::spreadMHz_ = 0.0;
-double Transmitter::spreadFactor_ = 0.0;
 double Transmitter::currentValue_ = 0.0;
+void* Transmitter::mmapPeripherals_ = NULL;
+
 
 bool Transmitter::isTransmitting_ = false;
-unsigned Transmitter::frameOffset_ = 0;
+long long unsigned Transmitter::frameOffset_ = 0;
 vector<float>* Transmitter::buffer_ = NULL;
-void* Transmitter::peripherals_ = NULL;
+bool Transmitter::doStop = false;
+
+std::mutex Transmitter::transmitMutex_;
+
+unsigned Transmitter::clockOffsetAddr_ = CM_GP0CTL;
 
 
-Transmitter::Transmitter()
-{
-    bool isBcm2835 = true;
+// TODO: Not hard coded?
+const double softOffDifferenceMHz_ = 0.250; // 250kHz off the center is "soft off"
+const unsigned slewTimeMicroseconds_ = 1000000; // 1 second on/off slew
 
-    FILE* pipe = popen("uname -m", "r");
-    if (pipe) {
-        char inputBuffer[64];
-        string machine = "";
-        while (!feof(pipe)) {
-            if (fgets(inputBuffer, 64, pipe)) {
-                machine += inputBuffer;
-            }
-        }
-        pclose(pipe);
+// Pause between frequency updates to avoid overloading the clock manager
+const unsigned updateDelayMicroseconds_ = 10; // 100 kHz updates
 
-        machine = machine.substr(0, machine.length() - 1);
-        if (machine != "armv6l") {
-            isBcm2835 = false;
-        }
-    }
+
+/*
+ * Code flow plan:
+ *
+ * Transmitter::Transmitter()
+ *    - Current:
+ *        - memory map peripherals
+ *    - Should:
+ *        x memory map peripherals,
+ *        - safely start the clock
+ *             :: disable clock
+ *             :: set divisor safely before start
+ *             :: wait for busy bit to clear
+ *             :: enable clock
+ *             :: wind transmit frequency to center frequency over period of time
+ *
+ * Transmitter::~Transmitter()
+ *    - Current:
+ *        - unmap peripherals
+ *    - Should:
+ *        - gracefully stop clock
+ *            :: wind transmit frequency away from center frequency over period of time
+ *            :: disable clock
+ *            :: wait for busy bit to clear
+ *        - unmap peripherals
+ *
+ *
+ * Transmitter::play()
+ *    - Current:
+ *        - Reads first frame
+ *        - Starts transmit thread with sample rate set
+ *        -
+  *    - Should:
+ *        - TODO
+ *
+ * Transmitter::transmit()
+ *    - Current:
+ *        - enables clock
+ *        - sets divisor
+ *        - plays sample when enough time passes (if ready)
+ *    -
+ */
+
+inline void* mmapPeripherals() {
+    LOG_DEBUG << "Memory mapping peripherals";
 
     int memFd;
     if ((memFd = open("/dev/mem", O_RDWR | O_SYNC)) < 0) {
         throw ErrorReporter("Cannot open /dev/mem (permission denied)");
     }
-
-    peripherals_ = mmap(NULL, 0x002FFFFF, PROT_READ | PROT_WRITE, MAP_SHARED, memFd, isBcm2835 ? 0x20000000 : 0x3F000000);
+    void* peripheralsBase = mmap(NULL,
+                                 PERIPHERALS_LENGTH,
+                                 PROT_READ | PROT_WRITE,
+                                 MAP_SHARED,
+                                 memFd,
+                                 PERIPHERALS_BASE);
     close(memFd);
-    if (peripherals_ == MAP_FAILED) {
+    if (peripheralsBase == MAP_FAILED) {
         throw ErrorReporter("Cannot obtain access to peripherals_ (mmap error)");
     }
+    return peripheralsBase;
+}
+
+Transmitter::Transmitter()
+{
+    LOG_DEBUG << "Initializing transmitter";
+    mmapPeripherals_ = mmapPeripherals();
 }
 
 Transmitter::~Transmitter()
 {
-    munmap(peripherals_, 0x002FFFFF);
-    // TODO: Reset the GPIO?
+    LOG_DEBUG << "Deleting transmitter";
+    munmap((void*)mmapPeripherals_, PERIPHERALS_LENGTH);
 }
 
 Transmitter* Transmitter::getInstance()
@@ -130,9 +155,140 @@ Transmitter* Transmitter::getInstance()
     return &instance;
 }
 
-void Transmitter::setClockDivisor(double value){
-    currentValue_ = value;
-    double divisor = clockFreqMHz_ / (spreadMHz_ * value + centerFreqMHz_);
+
+/**
+ * Slew clock from one frequency to another
+ *
+ * Return the final clock divisor
+ */
+unsigned Transmitter::clkSlew(double finalFreqMHz,
+                              double startFreqMHz,
+                              double slewTimeMicroseconds) {
+
+    LOG_DEBUG << "Clock slew: finalFreqMHz=" << finalFreqMHz
+              << ", startFreqMHz=" << startFreqMHz
+              << ", slewTimeMicroseconds=" << (double)slewTimeMicroseconds;
+
+    volatile unsigned long long startMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+    volatile unsigned long long currentMicroseconds = startMicroseconds;
+
+    while (true) {
+        if (slewTimeMicroseconds < currentMicroseconds - startMicroseconds) {
+            break;
+        }
+        usleep(updateDelayMicroseconds_);
+        currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+        double targetFreqMHz = startFreqMHz +
+            ((double)(currentMicroseconds - startMicroseconds) / (double)(slewTimeMicroseconds)) *
+            (finalFreqMHz - startFreqMHz);
+        clkDivisorSet(targetFreqMHz);
+    }
+
+    // Final update to target frequency
+    usleep(updateDelayMicroseconds_);
+    return clkDivisorSet(finalFreqMHz);
+}
+
+
+/**
+ * Hard shutdown of the clock
+ *
+ * Returns the clock manager state prior to shutdown
+ */
+unsigned Transmitter::clkShutdownHard(bool lock=true) {
+    LOG_DEBUG << "Hard shutdown of clock " << HEX_STREAM(clockOffsetAddr_);
+
+    // Lock the mutex for this scope
+    if (lock) {
+        LOG_DEBUG << "Acquiring lock...";
+        transmitMutex_.lock();
+    }
+    // Disable clock and wait for it to become available
+    unsigned cmCtlInitialState = ACCESS(mmapPeripherals_, clockOffsetAddr_);
+    ACCESS(mmapPeripherals_, clockOffsetAddr_) = (cmCtlInitialState & 0x00FFFFEF) | CM_PASSWD;
+    while (true) {
+        volatile bool enabledOrBusy =
+            ACCESS(mmapPeripherals_, clockOffsetAddr_) & (0x01 << 4 | 0x01 << 7);
+        if (!enabledOrBusy) {
+            LOG_DEBUG << "Clock shutdown complete";
+            break;
+        }
+        usleep(1);
+    }
+
+    transmitMutex_.unlock();
+    return cmCtlInitialState;
+}
+
+
+/**
+ * Hard init of the clock
+ *
+ * Returns the clock divisor.
+ */
+unsigned Transmitter::clkInitHard(double freqMHz, bool lock=true) {
+    LOG_DEBUG << "Hard-init of clock " << HEX_STREAM(clockOffsetAddr_)
+              << " to frequency " << freqMHz << " MHz";
+
+    if (lock) {
+        LOG_DEBUG << "Acquiring lock...";
+        transmitMutex_.lock();
+    }
+
+    clkShutdownHard(false);
+
+    unsigned clkDivisor = clkDivisorSet(freqMHz);
+
+    // Set GPIO pin 4 alternate function 1 (GPCLK0)
+    ACCESS(mmapPeripherals_, GPFSEL0) =
+        (ACCESS(mmapPeripherals_, GPFSEL0) & 0xFFFF8FFF) | (0x01 << 14);
+
+    // Set up the clock manager
+    ACCESS(mmapPeripherals_, CM_GP0CTL) =
+        CM_PASSWD | CM_MASH1 | CM_ENAB | CM_SRC_PLLD;
+
+    transmitMutex_.unlock();
+    return clkDivisor;
+}
+
+/**
+ * Soft shutdown of the clock
+ *
+ * Returns the state of the clock manager prior to shutdown
+ */
+unsigned Transmitter::clkShutdownSoft() {
+    LOG_DEBUG << "Soft shutdown of clock";
+
+    LOG_DEBUG << "Acquiring lock...";
+    transmitMutex_.lock();
+    clkSlew(centerFreqMHz_ + softOffDifferenceMHz_, centerFreqMHz_, slewTimeMicroseconds_);
+    unsigned previousState =  clkShutdownHard(false);
+    transmitMutex_.unlock();
+    return previousState;
+}
+
+
+/**
+ * Soft init of the clock
+ *
+ * Returns final clock divisor.
+ */
+unsigned Transmitter::clkInitSoft() {
+    LOG_DEBUG << "Starting soft-init of clock to " << centerFreqMHz_ << " MHz";
+    double startFreqMHz =  centerFreqMHz_ + softOffDifferenceMHz_;
+    std::lock_guard<std::mutex> lock(transmitMutex_);
+    clkInitHard(startFreqMHz, false);
+    return clkSlew(centerFreqMHz_,  centerFreqMHz_ + softOffDifferenceMHz_, slewTimeMicroseconds_);
+}
+
+
+/**
+ * Set the clock divisor from a given frequency
+ *
+ * Returns the new clock divisor.
+ */
+unsigned Transmitter::clkDivisorSet(double targetFreqMHz) {
+    double divisor = PLLD_FREQ_MHZ / targetFreqMHz;
     unsigned clockDivisor;
     if (divisor <= 0.0) {
         clockDivisor = 1;
@@ -141,20 +297,59 @@ void Transmitter::setClockDivisor(double value){
     } else {
         clockDivisor = (unsigned) (divisor * 4096.0 + 0.5);
     }
-    ACCESS(peripherals_, CLK0DIV_BASE) = PASSWORD | (0x00FFFFFF & clockDivisor) ;
+
+    ACCESS(mmapPeripherals_, CM_GP0DIV) = CM_PASSWD | (0x00FFFFFF & clockDivisor);
+    return clockDivisor;
 }
 
+
+/**
+ * Set the transmit frequency offset from the current spreadFreqMHz and centerFreqMHz
+ */
+void Transmitter::setTransmitValue(double value){
+    currentValue_ = value;
+    double targetFreqMHz = (spreadMHz_ * value + centerFreqMHz_);
+    clkDivisorSet(targetFreqMHz);
+}
+
+
+/**
+ * Set the center frequency and update the transmission
+ */
+void Transmitter::setCenterFreqMHz(double centerFreqMHz) {
+    centerFreqMHz_ = centerFreqMHz;
+    return setTransmitValue(currentValue_);
+}
+
+
+/**
+ * Set the spread and update the transmission
+ */
+void Transmitter::setSpreadMHz(double spreadMHz) {
+    spreadMHz_ = spreadMHz;
+    return setTransmitValue(currentValue_);
+}
+
+/**
+ * Play from stdin or a file
+ */
 void Transmitter::play(string filename,
                        double centerFreqMHz,
                        double spreadMHz,
                        bool loop)
 {
+    LOG_DEBUG << "Playing: filename=" << filename
+              << ", centerFreqMHz=" << centerFreqMHz
+              << ", spreadMHz=" << spreadMHz
+              << ", loop=" << loop;
+
     if (isTransmitting_) {
+        LOG_ERROR << "Cannot play, transmitter already in use";
         throw ErrorReporter("Cannot play, transmitter already in use");
     }
 
     WaveReader* waveReader = NULL;
-    StdinReader* stdin = NULL;
+    StdinReader* stdinReader = NULL;
     AudioFormat* format;
     bool readStdin = filename == "-";
 
@@ -162,73 +357,64 @@ void Transmitter::play(string filename,
         waveReader = new WaveReader(filename);
         format = waveReader->getFormat();
     } else {
-        stdin = StdinReader::getInstance();
-        format = stdin->getFormat();
+        stdinReader = StdinReader::getInstance();
+        format = stdinReader->getFormat();
         usleep(STDIN_READ_DELAY);
     }
 
     centerFreqMHz_ = centerFreqMHz;
     spreadMHz_ = spreadMHz;
-    // From the second-order Taylor expansion, scaled by 2^12
-    spreadFactor_ = 4096.0 * (spreadMHz / centerFreqMHz) * (clockFreqMHz_ / centerFreqMHz);
+    clkInitSoft();
 
-    isTransmitting_ = true;
     doStop = false;
 
     unsigned bufferFrames = (unsigned)((unsigned long long)format->sampleRate * BUFFER_TIME / 1000000);
 
-    buffer_ = (!readStdin) ? waveReader->getFrames(bufferFrames, 0) : stdin->getFrames(bufferFrames, doStop);
+    buffer_ = (!readStdin) ? waveReader->getFrames(bufferFrames, 0) : stdinReader->getFrames(bufferFrames, doStop);
 
-    pthread_t thread;
-    void* params = (void*)&format->sampleRate;
-
-    int returnCode = pthread_create(&thread, NULL, &Transmitter::transmit, params);
-    if (returnCode) {
-        if (!readStdin) {
-            delete waveReader;
-        }
-        delete format;
-        ostringstream oss;
-        oss << "Cannot create new thread (code: " << returnCode << ")";
-        throw ErrorReporter(oss.str());
-    }
+    std::thread activeThread (Transmitter::transmit, format->sampleRate);
 
     usleep(BUFFER_TIME / 2);
 
     bool doPlay = true;
     while (doPlay && !doStop) {
-        while ((readStdin || !waveReader->isEnd(frameOffset_ + bufferFrames)) && !doStop) {
+        while ((readStdin || !waveReader->isEnd((unsigned int) (frameOffset_ + bufferFrames))) && !doStop) {
             if (buffer_ == NULL) {
-                buffer_ = (!readStdin) ? waveReader->getFrames(bufferFrames, frameOffset_ + bufferFrames) : stdin->getFrames(bufferFrames, doStop);
-            }
-            usleep(BUFFER_TIME / 2);
-        }
-        if (loop && !readStdin && !doStop) {
-            isTransmitting_ = false;
-
-            buffer_ = waveReader->getFrames(bufferFrames, 0);
-
-            pthread_join(thread, NULL);
-
-            isTransmitting_ = true;
-
-            returnCode = pthread_create(&thread, NULL, &Transmitter::transmit, params);
-            if (returnCode) {
                 if (!readStdin) {
-                    delete waveReader;
+                    buffer_ = waveReader->getFrames(bufferFrames, (unsigned int) (frameOffset_ + bufferFrames));
+                } else {
+                    buffer_ = stdinReader->getFrames(bufferFrames, doStop);
                 }
-                delete format;
-                ostringstream oss;
-                oss << "Cannot create new thread (code: " << returnCode << ")";
-                throw ErrorReporter(oss.str());
             }
+            LOG_DEBUG << "Sleeping" ;
+            usleep(BUFFER_TIME / 2);
+
+            LOG_DEBUG << "frameOffset_=" << frameOffset_
+                      << ", bufferFrames=" << bufferFrames;
+        }
+        LOG_DEBUG << "broke out"
+                  << ": frameOffset_=" << frameOffset_
+                  << ", bufferFrames=" << bufferFrames;
+
+        if (loop && !readStdin && !doStop) {
+
+            LOG_DEBUG << "Looping...";
+
+            isTransmitting_ = false;
+            activeThread.join();
+            buffer_ = waveReader->getFrames(bufferFrames, 0);
+            frameOffset_ = 0;
+            std::thread newThread (Transmitter::transmit, format->sampleRate);
+            newThread.swap(activeThread);
+
         } else {
             doPlay = false;
         }
     }
     isTransmitting_ = false;
-
-    pthread_join(thread, NULL);
+    LOG_DEBUG << "Waiting for tranmsit thread to finish...";
+    activeThread.join();
+    LOG_DEBUG << "Transmit thread finished";
 
     if (!readStdin) {
         delete waveReader;
@@ -236,71 +422,44 @@ void Transmitter::play(string filename,
     delete format;
 }
 
-void* Transmitter::transmit(void* params)
+void* Transmitter::transmit(unsigned sampleRate)
 {
     unsigned long long currentMicroseconds, startMicroseconds, playbackStartMicroseconds;
-    unsigned offset, length, temp;
+    unsigned long offset;
+    unsigned long length;
+    unsigned long temp;
     vector<float>* frames = NULL;
-    float value = 0.0;
+    double value;
     float* data;
-    unsigned sampleRate = *(unsigned*)(params);
+    //unsigned sampleRate = *(unsigned*)(params);
 
-    // This was wrapped in a #ifndef NO_PREEMP guard
-    float prevValue = 0.0;
-    float preemp = 0.75 - 250000.0 / (float)(sampleRate * 75);
-
-    // Set up clock and peripherals
-
-    // Clear GPFSEL0 bits 12, 13, 14 and set bit 14 (GPIO pin 4 alternate function 1, which is GPCLK0)
-    ACCESS(peripherals_, GPIO_BASE) = (ACCESS(peripherals_, GPIO_BASE) & 0xFFFF8FFF) | (0x01 << 14);
-
-    // This enables all 3...
-    //ACCESS(peripherals_, GPIO_BASE) = (ACCESS(peripherals_, GPIO_BASE) & 0xFFE00FFF) | (0x01 << 14) | (0x01 << 17) | (0x01 << 20);
-
-
-    // Set up the clock manager
-    // PASSWD (0x5A << 24)  // required
-    // MASH (0x01 << 9)  // 1-stage mash filter
-    // ENAB (0x01 << 4) // enable the clock
-    // SRC (0x06)  // 6 = PLLD per  (either runs at 400 or 500 MHz)
-
-
-
-    ACCESS(peripherals_, CLK0_BASE) =
-        (0x5A << 24) |
-        (0x01 << 9) |
-        (0x01 << 4) |
-        0x06;
-    // ACCESS(peripherals_, CLK1_BASE) =
-    //  (0x5A << 24) |
-    //  (0x01 << 9) |
-    //  (0x01 << 4) |
-    //  0x06;
-    //ACCESS(peripherals_, CLK2_BASE) =
-    //  (0x5A << 24) |
-    //  (0x01 << 9) |
-    //  (0x01 << 4) |
-    //  0x06;
-
+    LOG_DEBUG << "Starting transmitter with sample rate " << sampleRate;
     frameOffset_ = 0;
 
     // playbackStartMicroseconds = current clock timer
-    playbackStartMicroseconds = ACCESS64(peripherals_, TCNT_BASE);
+    playbackStartMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
     currentMicroseconds = playbackStartMicroseconds;
     startMicroseconds = playbackStartMicroseconds;
+
+    LOG_DEBUG << "Acquiring lock...";
+    transmitMutex_.lock();
+    isTransmitting_ = true;
 
     while (isTransmitting_) {
         while ((buffer_ == NULL) && isTransmitting_) {
             usleep(1);
-            currentMicroseconds = ACCESS64(peripherals_, TCNT_BASE);
         }
         if (!isTransmitting_) {
             break;
         }
         frames = buffer_;
-
-        frameOffset_ = (currentMicroseconds - playbackStartMicroseconds) * (sampleRate) / 1000000;
         buffer_ = NULL;
+
+        currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+        frameOffset_ = (currentMicroseconds - playbackStartMicroseconds) * (sampleRate) / 1000000;
+
+        LOG_DEBUG << "Got new frame: " << frames
+                  << ", buffer_=" << buffer_;
 
         length = frames->size();
         data = &(*frames)[0];
@@ -316,51 +475,42 @@ void* Transmitter::transmit(void* params)
 
             value = data[offset];
 
-            // Preemphasis correction
-            value = value + (value - prevValue) * preemp;
-
             // Clip value
             value = (value < -1.0) ? -1.0 : ((value > 1.0) ? 1.0 : value);
-
-            // 5A << 24 is the password, 16.0 = 16MHz the spread of the signal?
-            // NB: newDivisor is a 24-bit number, with 12-bit integral and 12-bit fractional parts.
-            setClockDivisor(value);
+            setTransmitValue(value);
 
             while (temp >= offset) {
                 asm("nop");  // Super tight timing loop will run CPU at full blast
-                currentMicroseconds = ACCESS64(peripherals_, TCNT_BASE);
+                currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
 
-                // TODO: This overflows about every 71 minutes, which will result an immediate shutoff
-                offset = (currentMicroseconds - startMicroseconds) * (sampleRate) / 1000000;
+                offset = ((currentMicroseconds - startMicroseconds) * (sampleRate)) / 1000000;
             }
-            prevValue = value;
         }
 
-        startMicroseconds = ACCESS64(peripherals_, TCNT_BASE);
+        startMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
         delete frames;
     }
 
     // Reset to zero
-    ACCESS(peripherals_, CLK0_BASE) = (0x5A << 24);
-    //ACCESS(peripherals_, CLK1_BASE) = (0x5A << 24);
-    //ACCESS(peripherals_, CLK2_BASE) = (0x5A << 24);
-
+    setTransmitValue(0.0);
+    LOG_DEBUG << "Transmitter shut down";
+    transmitMutex_.unlock();
     return NULL;
 }
 
 AudioFormat* Transmitter::getFormat(string filename)
 {
-    WaveReader* file;
-    StdinReader* stdin;
-    AudioFormat* format;
+    WaveReader* file = NULL;
+    StdinReader* stdinReader = NULL;
+    AudioFormat* format = NULL;
 
    if (filename != "-") {
         file = new WaveReader(filename);
         format = file->getFormat();
         delete file;
     } else {
-        stdin = StdinReader::getInstance();
-        format = stdin->getFormat();
+        stdinReader = StdinReader::getInstance();
+        format = stdinReader->getFormat();
     }
 
    return format;
@@ -369,4 +519,8 @@ AudioFormat* Transmitter::getFormat(string filename)
 void Transmitter::stop()
 {
     doStop = true;
+    isTransmitting_ = false;
+    usleep(100);
+    clkShutdownSoft();
 }
+
