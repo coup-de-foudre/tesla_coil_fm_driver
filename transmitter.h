@@ -37,6 +37,8 @@
 #include "error_reporter.h"
 #include "audio_format.h"
 #include <vector>
+#include <thread>
+#include <mutex>
 
 using std::vector;
 
@@ -60,18 +62,16 @@ class Transmitter {
 private:
     Transmitter();
 
-    bool doStop;
-
     static void setTransmitValue(double value);
     static void* transmit(unsigned sampleRate);
 
     static unsigned clkSlew(double finalFreqMHz,
                             double startFreqMHz,
                             double slewTimeMicroseconds);
-    static unsigned clkShutdownHard();
+    static unsigned clkShutdownHard(bool lock);
     static unsigned clkShutdownSoft();
 
-    static unsigned clkInitHard(double freqMHz);
+    static unsigned clkInitHard(double freqMHz, bool lock);
     static unsigned clkInitSoft();
 
     static unsigned clkDivisorSet(double targetFreqMHz);
@@ -79,14 +79,18 @@ private:
     void setSpreadMHz(double spreadMHz);
     void initClock();
 
-    static vector<float>* buffer_;
-    static unsigned long long frameOffset_;
-    static bool isTransmitting_;
     static double centerFreqMHz_;
     static double spreadMHz_;
     static double currentValue_;
     static void* mmapPeripherals_;
     static unsigned clockOffsetAddr_;
+
+    static std::mutex transmitMutex_;
+
+    static vector<float>* buffer_;
+    static unsigned long long frameOffset_;
+    static bool isTransmitting_;
+    static bool doStop;
 
 };
 

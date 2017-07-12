@@ -54,17 +54,12 @@ void sigIntHandler(int sigNum)
 
 int main(int argc, char** argv)
 {
-    // PLog documentation at https://github.com/SergiusTheBest/plog
-    static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
-    plog::init(plog::debug, &consoleAppender);
-    //plog::init(plog::debug, "log.txt");
-
     double frequencyMHz = 100.0;
     double spreadMHz = 0.078;
 
     bool loop = false;
     string filename;
-
+    bool debugLog = false;
     bool showUsage = true;
     for (int i = 1; i < argc; i++) {
         if (string("-f") == argv[i]) {
@@ -79,6 +74,8 @@ int main(int argc, char** argv)
             }
         } else if (string("-r") == argv[i]) {
             loop = true;
+        } else if (string("-v") == argv[i]) {
+            debugLog = true;
         } else {
             if (i == argc - 1) {
                 showUsage = false;
@@ -86,9 +83,19 @@ int main(int argc, char** argv)
             }
         }
     }
+    // PLog documentation at https://github.com/SergiusTheBest/plog
+    static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
+
+    if (debugLog) {
+        plog::init(plog::debug, &consoleAppender);
+    } else {
+        plog::init(plog::info, &consoleAppender);
+    }
+    //plog::init(plog::debug, "log.txt");
+
 
     if (showUsage) {
-        cout << "Usage: " << argv[0] << " [-f frequencyMHz=100.0] [-s spreadMHz=0.078] [-r] FILE" << endl;
+        cout << "Usage: " << argv[0] << " [-f frequencyMHz=100.0] [-s spreadMHz=0.078] [-v] [-r] FILE" << endl;
         return 0;
     }
 

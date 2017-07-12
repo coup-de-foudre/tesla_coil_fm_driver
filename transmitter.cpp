@@ -39,7 +39,6 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <plog/Log.h>
-
 #include <thread>
 
 
@@ -55,13 +54,18 @@ using std::ostringstream;
 double Transmitter::centerFreqMHz_ = 0.0;
 double Transmitter::spreadMHz_ = 0.0;
 double Transmitter::currentValue_ = 0.0;
+void* Transmitter::mmapPeripherals_ = NULL;
+
 
 bool Transmitter::isTransmitting_ = false;
 long long unsigned Transmitter::frameOffset_ = 0;
 vector<float>* Transmitter::buffer_ = NULL;
-void* Transmitter::mmapPeripherals_ = NULL;
+bool Transmitter::doStop = false;
+
+std::mutex Transmitter::transmitMutex_;
 
 unsigned Transmitter::clockOffsetAddr_ = CM_GP0CTL;
+
 
 // TODO: Not hard coded?
 const double softOffDifferenceMHz_ = 0.250; // 250kHz off the center is "soft off"
@@ -143,7 +147,6 @@ Transmitter::~Transmitter()
 {
     LOG_DEBUG << "Deleting transmitter";
     munmap((void*)mmapPeripherals_, PERIPHERALS_LENGTH);
-    // TODO: Reset the GPIO
 }
 
 Transmitter* Transmitter::getInstance()
@@ -151,7 +154,6 @@ Transmitter* Transmitter::getInstance()
     static Transmitter instance;
     return &instance;
 }
-
 
 
 /**
@@ -187,14 +189,20 @@ unsigned Transmitter::clkSlew(double finalFreqMHz,
     return clkDivisorSet(finalFreqMHz);
 }
 
+
 /**
  * Hard shutdown of the clock
  *
  * Returns the clock manager state prior to shutdown
  */
-unsigned Transmitter::clkShutdownHard() {
+unsigned Transmitter::clkShutdownHard(bool lock=true) {
     LOG_DEBUG << "Hard shutdown of clock " << HEX_STREAM(clockOffsetAddr_);
 
+    // Lock the mutex for this scope
+    if (lock) {
+        LOG_DEBUG << "Acquiring lock...";
+        transmitMutex_.lock();
+    }
     // Disable clock and wait for it to become available
     unsigned cmCtlInitialState = ACCESS(mmapPeripherals_, clockOffsetAddr_);
     ACCESS(mmapPeripherals_, clockOffsetAddr_) = (cmCtlInitialState & 0x00FFFFEF) | CM_PASSWD;
@@ -207,6 +215,8 @@ unsigned Transmitter::clkShutdownHard() {
         }
         usleep(1);
     }
+
+    transmitMutex_.unlock();
     return cmCtlInitialState;
 }
 
@@ -216,10 +226,16 @@ unsigned Transmitter::clkShutdownHard() {
  *
  * Returns the clock divisor.
  */
-unsigned Transmitter::clkInitHard(double freqMHz) {
+unsigned Transmitter::clkInitHard(double freqMHz, bool lock=true) {
     LOG_DEBUG << "Hard-init of clock " << HEX_STREAM(clockOffsetAddr_)
               << " to frequency " << freqMHz << " MHz";
-    clkShutdownHard();
+
+    if (lock) {
+        LOG_DEBUG << "Acquiring lock...";
+        transmitMutex_.lock();
+    }
+
+    clkShutdownHard(false);
 
     unsigned clkDivisor = clkDivisorSet(freqMHz);
 
@@ -231,6 +247,7 @@ unsigned Transmitter::clkInitHard(double freqMHz) {
     ACCESS(mmapPeripherals_, CM_GP0CTL) =
         CM_PASSWD | CM_MASH1 | CM_ENAB | CM_SRC_PLLD;
 
+    transmitMutex_.unlock();
     return clkDivisor;
 }
 
@@ -241,8 +258,13 @@ unsigned Transmitter::clkInitHard(double freqMHz) {
  */
 unsigned Transmitter::clkShutdownSoft() {
     LOG_DEBUG << "Soft shutdown of clock";
+
+    LOG_DEBUG << "Acquiring lock...";
+    transmitMutex_.lock();
     clkSlew(centerFreqMHz_ + softOffDifferenceMHz_, centerFreqMHz_, slewTimeMicroseconds_);
-    return clkShutdownHard();
+    unsigned previousState =  clkShutdownHard(false);
+    transmitMutex_.unlock();
+    return previousState;
 }
 
 
@@ -254,7 +276,8 @@ unsigned Transmitter::clkShutdownSoft() {
 unsigned Transmitter::clkInitSoft() {
     LOG_DEBUG << "Starting soft-init of clock to " << centerFreqMHz_ << " MHz";
     double startFreqMHz =  centerFreqMHz_ + softOffDifferenceMHz_;
-    clkInitHard(startFreqMHz);
+    std::lock_guard<std::mutex> lock(transmitMutex_);
+    clkInitHard(startFreqMHz, false);
     return clkSlew(centerFreqMHz_,  centerFreqMHz_ + softOffDifferenceMHz_, slewTimeMicroseconds_);
 }
 
@@ -274,8 +297,8 @@ unsigned Transmitter::clkDivisorSet(double targetFreqMHz) {
     } else {
         clockDivisor = (unsigned) (divisor * 4096.0 + 0.5);
     }
-    ACCESS(mmapPeripherals_, CM_GP0DIV) = CM_PASSWD | (0x00FFFFFF & clockDivisor);
 
+    ACCESS(mmapPeripherals_, CM_GP0DIV) = CM_PASSWD | (0x00FFFFFF & clockDivisor);
     return clockDivisor;
 }
 
@@ -343,7 +366,6 @@ void Transmitter::play(string filename,
     spreadMHz_ = spreadMHz;
     clkInitSoft();
 
-    isTransmitting_ = true;
     doStop = false;
 
     unsigned bufferFrames = (unsigned)((unsigned long long)format->sampleRate * BUFFER_TIME / 1000000);
@@ -380,8 +402,6 @@ void Transmitter::play(string filename,
 
             isTransmitting_ = false;
             activeThread.join();
-            isTransmitting_ = true;
-
             buffer_ = waveReader->getFrames(bufferFrames, 0);
             frameOffset_ = 0;
             std::thread newThread (Transmitter::transmit, format->sampleRate);
@@ -392,9 +412,9 @@ void Transmitter::play(string filename,
         }
     }
     isTransmitting_ = false;
-
-    //pthread_join(thread, NULL);
+    LOG_DEBUG << "Waiting for tranmsit thread to finish...";
     activeThread.join();
+    LOG_DEBUG << "Transmit thread finished";
 
     if (!readStdin) {
         delete waveReader;
@@ -420,18 +440,26 @@ void* Transmitter::transmit(unsigned sampleRate)
     playbackStartMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
     currentMicroseconds = playbackStartMicroseconds;
     startMicroseconds = playbackStartMicroseconds;
+
+    LOG_DEBUG << "Acquiring lock...";
+    transmitMutex_.lock();
+    isTransmitting_ = true;
+
     while (isTransmitting_) {
         while ((buffer_ == NULL) && isTransmitting_) {
             usleep(1);
-            currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
         }
         if (!isTransmitting_) {
             break;
         }
         frames = buffer_;
-
-        frameOffset_ = (currentMicroseconds - playbackStartMicroseconds) * (sampleRate) / 1000000;
         buffer_ = NULL;
+
+        currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+        frameOffset_ = (currentMicroseconds - playbackStartMicroseconds) * (sampleRate) / 1000000;
+
+        LOG_DEBUG << "Got new frame: " << frames
+                  << ", buffer_=" << buffer_;
 
         length = frames->size();
         data = &(*frames)[0];
@@ -465,7 +493,8 @@ void* Transmitter::transmit(unsigned sampleRate)
 
     // Reset to zero
     setTransmitValue(0.0);
-    LOG_DEBUG << "Trasnmitter shut down";
+    LOG_DEBUG << "Transmitter shut down";
+    transmitMutex_.unlock();
     return NULL;
 }
 
@@ -490,6 +519,8 @@ AudioFormat* Transmitter::getFormat(string filename)
 void Transmitter::stop()
 {
     doStop = true;
-    clkShutdownSoft(); // TODO: Transmit lock?
+    isTransmitting_ = false;
+    usleep(100);
+    clkShutdownSoft();
 }
 

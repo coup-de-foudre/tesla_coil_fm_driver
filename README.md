@@ -22,7 +22,7 @@ make
 
 Then you can use it by typing:
 ```
-sudo ./fm_transmitter [-f frequencyMHz=100.0] [-s spreadMHz=0.078] [-r {loop if set}] filename
+sudo ./fm_transmitter [-f frequencyMHz=100.0] [-s spreadMHz=0.078] [-r {loop if set}] [-v {verbose logging if set}] filename
 ```
 
 ### WAVE Files
