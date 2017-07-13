@@ -119,8 +119,13 @@ int main(int argc, char** argv)
         transmitter->play(filename, frequencyMHz, spreadMHz, loop);
     } catch (exception &error) {
         LOG_ERROR << "Error: " << error.what();
+        transmitter = Transmitter::getInstance();
+        if (transmitter != NULL) {
+            transmitter->stop();
+        }
         return 1;
     }
 
+    transmitter->stop();
     return 0;
 }
