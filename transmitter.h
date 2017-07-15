@@ -42,7 +42,7 @@
 
 using std::vector;
 
-#define BUFFER_TIME 1000000
+#define BUFFER_TIME 100000
 
 using std::string;
 

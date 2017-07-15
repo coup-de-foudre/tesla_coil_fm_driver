@@ -56,7 +56,7 @@ class StdinReader
         AudioFormat* getFormat();
 
         static StdinReader* getInstance();
-    private:
+    //private:
         StdinReader();
 
         static vector<char> stream;

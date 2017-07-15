@@ -353,6 +353,11 @@ void Transmitter::play(string filename,
     AudioFormat* format;
     bool readStdin = filename == "-";
 
+    centerFreqMHz_ = centerFreqMHz;
+    spreadMHz_ = spreadMHz;
+    clkInitSoft();
+
+    doStop = false;
     if (!readStdin) {
         waveReader = new WaveReader(filename);
         format = waveReader->getFormat();
@@ -362,11 +367,6 @@ void Transmitter::play(string filename,
         usleep(STDIN_READ_DELAY);
     }
 
-    centerFreqMHz_ = centerFreqMHz;
-    spreadMHz_ = spreadMHz;
-    clkInitSoft();
-
-    doStop = false;
 
     unsigned bufferFrames = (unsigned)((unsigned long long)format->sampleRate * BUFFER_TIME / 1000000);
 
@@ -374,9 +374,10 @@ void Transmitter::play(string filename,
 
     std::thread activeThread (Transmitter::transmit, format->sampleRate);
 
-    usleep(BUFFER_TIME / 2);
+//    usleep(BUFFER_TIME / 2);
 
     bool doPlay = true;
+StdinReader::stream.clear();
     while (doPlay && !doStop) {
         while ((readStdin || !waveReader->isEnd((unsigned int) (frameOffset_ + bufferFrames))) && !doStop) {
             if (buffer_ == NULL) {
@@ -387,7 +388,8 @@ void Transmitter::play(string filename,
                 }
             }
             LOG_DEBUG << "Sleeping" ;
-            usleep(BUFFER_TIME / 2);
+//            usleep(BUFFER_TIME / 2);
+		usleep(1);
 
             LOG_DEBUG << "frameOffset_=" << frameOffset_
                       << ", bufferFrames=" << bufferFrames;

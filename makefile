@@ -1,4 +1,4 @@
-CFLAGS += -Wall -fexceptions -pthread -lm -O3 -fpermissive -fno-strict-aliasing -std=c++14
+CFLAGS += -Wall -fexceptions -pthread -lasound -lm -O3 -fpermissive -fno-strict-aliasing -std=c++14
 TARGET = fm_transmitter
 
 CPP=$(CCPREFIX)g++
