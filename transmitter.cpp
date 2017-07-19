@@ -247,7 +247,9 @@ unsigned Transmitter::clkInitHard(double freqMHz, bool lock=true) {
     ACCESS(mmapPeripherals_, CM_GP0CTL) =
         CM_PASSWD | CM_MASH1 | CM_ENAB | CM_SRC_PLLD;
 
-    transmitMutex_.unlock();
+    if (lock) {
+        transmitMutex_.unlock();
+    }
     return clkDivisor;
 }
 
