@@ -3,6 +3,51 @@
 Freeform notes as things are getting set up.
 
 
+## USB Audio
+
+### Alsalib
+
+Install ALSA headers:
+
+    apt-get install libasound2-dev
+
+
+### Sabrent AU-MMSA
+
+
+  1. Turn off Pi.
+  1. Plug in Sabrent USB sound adapter.
+  1. Turn on Pi, log in, and type `dmesg | grep -i usb`. Towards the end of the output,
+     you'll see
+       
+        [    2.418908] usb 1-1.1: new high-speed USB device number 3 using dwc_otg
+        [    2.519219] usb 1-1.1: New USB device found, idVendor=0424, idProduct=ec00
+        [    2.519241] usb 1-1.1: New USB device strings: Mfr=0, Product=0, SerialNumber=0
+        [    2.582348] smsc95xx 1-1.1:1.0 eth0: register 'smsc95xx' at usb-3f980000.usb-1.1, smsc95xx USB 2.0 Ethernet, b8:27:eb:ea:c4:f2
+        [    3.598942] usb 1-1.3: new full-speed USB device number 4 using dwc_otg
+        [    3.709525] usb 1-1.3: New USB device found, idVendor=0d8c, idProduct=0014
+        [    3.709550] usb 1-1.3: New USB device strings: Mfr=1, Product=2, SerialNumber=0
+        [    3.709563] usb 1-1.3: Product: USB Audio Device
+        [    3.709575] usb 1-1.3: Manufacturer: C-Media Electronics Inc.
+        [    3.716191] input: C-Media Electronics Inc. USB Audio Device as /devices/platform/soc/3f980000.usb/usb1/1-1/1-1.3/1-1.3:1.3/0003:0D8C:0014.0001/input/input0
+        [    3.760845] usbcore: registered new interface driver brcmfmac
+        [    3.769234] hid-generic 0003:0D8C:0014.0001: input,hidraw0: USB HID v1.00 Device [C-Media Electronics Inc. USB Audio Device] on usb-3f980000.usb-1.3/input3
+        [    3.991198] usbcore: registered new interface driver snd-usb-audio
+
+  1. Determin you chipset by following 
+     [these instructions](https://learn.adafruit.com/usb-audio-cards-with-a-raspberry-pi/figure-out-your-chipset).
+     In the case above, we are using a `cm108`.
+  1. Update your packages:
+     
+         sudo apt-get update
+         sudo apt-get upgrade
+         sudo reboot
+    
+    
+
+    
+    
+
 ## Dev Environment
 
 These might be useful:
