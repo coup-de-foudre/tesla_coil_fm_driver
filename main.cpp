@@ -61,6 +61,8 @@ int main(int argc, char** argv)
     string filename;
     bool debugLog = false;
     bool showUsage = true;
+    string alsaDevice = "plughw:1,0";
+
     for (int i = 1; i < argc; i++) {
         if (string("-f") == argv[i]) {
             if (i < argc - 1) {
@@ -76,6 +78,11 @@ int main(int argc, char** argv)
             loop = true;
         } else if (string("-v") == argv[i]) {
             debugLog = true;
+        } else if (string("-d") == argv[i]) {
+            if (i < argc - 1) {
+                alsaDevice = argv[i+1];
+                i++;
+            }
         } else {
             if (i == argc - 1) {
                 showUsage = false;
@@ -83,6 +90,7 @@ int main(int argc, char** argv)
             }
         }
     }
+
     // PLog documentation at https://github.com/SergiusTheBest/plog
     static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
 
@@ -95,7 +103,7 @@ int main(int argc, char** argv)
 
 
     if (showUsage) {
-        cout << "Usage: " << argv[0] << " [-f frequencyMHz=100.0] [-s spreadMHz=0.078] [-v] [-r] FILE" << endl;
+        cout << "Usage: " << argv[0] << " [-f frequencyMHz=100.0] [-s spreadMHz=0.078] [-v] [-r] [-d alsa-device] FILE" << endl;
         return 0;
     }
 
@@ -109,14 +117,14 @@ int main(int argc, char** argv)
     try {
         transmitter = Transmitter::getInstance();
 
-        AudioFormat* format = Transmitter::getFormat(filename);
+        AudioFormat* format = Transmitter::getFormat(filename, alsaDevice);
         LOG_INFO << "Playing: " << ((filename != "-") ? filename : "stdin") << ", "
                  << format->sampleRate << " Hz, "
                  << format->bitsPerSample << " bits, "
                  << ((format->channels > 0x01) ? "stereo" : "mono");
         delete format;
 
-        transmitter->play(filename, frequencyMHz, spreadMHz, loop);
+        transmitter->play(filename, alsaDevice, frequencyMHz, spreadMHz, loop);
     } catch (exception &error) {
         LOG_ERROR << "Error: " << error.what();
         transmitter = Transmitter::getInstance();

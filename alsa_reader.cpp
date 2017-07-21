@@ -31,7 +31,7 @@
     WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include "stdin_reader.h"
+#include "alsa_reader.h"
 #include "error_reporter.h"
 #include <sstream>
 #include <unistd.h>
@@ -42,14 +42,16 @@
 
 using std::ostringstream;
 
-bool StdinReader::doStop = false;
-bool StdinReader::isReading = false;
-bool StdinReader::isDataAccess = false;
-vector<char> StdinReader::stream;
+bool AlsaReader::doStop = false;
+bool AlsaReader::isReading = false;
+bool AlsaReader::isDataAccess = false;
+vector<char> AlsaReader::stream;
+std::string AlsaReader::alsaDevice_ = "plughw:1,0";
 
-StdinReader::StdinReader()
+AlsaReader::AlsaReader(std::string alsaDevice)
 {
-    int returnCode = pthread_create(&thread, NULL, &StdinReader::readStdin, NULL);
+    alsaDevice_ = alsaDevice;
+    int returnCode = pthread_create(&thread, NULL, &AlsaReader::readStdin, NULL);
     if (returnCode) {
         ostringstream oss;
         oss << "Cannot create new thread (code: " << returnCode << ")";
@@ -61,39 +63,38 @@ StdinReader::StdinReader()
     }
 }
 
-StdinReader::~StdinReader()
+AlsaReader::~AlsaReader()
 {
     doStop = true;
     pthread_join(thread, NULL);
 }
 
-StdinReader* StdinReader::getInstance()
+AlsaReader* AlsaReader::getInstance(string alsaDevice)
 {
-    static StdinReader instance;
+    static AlsaReader instance(alsaDevice);
     return &instance;
 }
 
-void *StdinReader::readStdin(void *params)
+void *AlsaReader::readStdin(void *params)
 {
-    int i;
     int err;
-    unsigned int rate = 22050;
+    unsigned int rate = STREAM_SAMPLE_RATE;
     snd_pcm_t *capture_handle;
     snd_pcm_hw_params_t *hw_params;
 
-    if ((err = snd_pcm_open (&capture_handle, "plughw:1,0", SND_PCM_STREAM_CAPTURE, 0)) < 0) {
-        fprintf (stderr, "cannot open audio device %s (%s)\n", 
+    if ((err = snd_pcm_open (&capture_handle, alsaDevice_.c_str(), SND_PCM_STREAM_CAPTURE, 0)) < 0) {
+        fprintf (stderr, "cannot open audio device %s (%s)\n",
              "fd",
              snd_strerror (err));
         exit (1);
     }
-       
+
     if ((err = snd_pcm_hw_params_malloc (&hw_params)) < 0) {
         fprintf (stderr, "cannot allocate hardware parameter structure (%s)\n",
              snd_strerror (err));
         exit (1);
     }
-             
+
     if ((err = snd_pcm_hw_params_any (capture_handle, hw_params)) < 0) {
         fprintf (stderr, "cannot initialize hardware parameter structure (%s)\n",
              snd_strerror (err));
@@ -170,7 +171,7 @@ void *StdinReader::readStdin(void *params)
     return NULL;
 }
 
-vector<float>* StdinReader::getFrames(unsigned frameCount, bool &forceStop)
+vector<float>* AlsaReader::getFrames(unsigned frameCount, bool &forceStop)
 {
     while (isReading && !forceStop) {
         usleep(1);
@@ -224,7 +225,7 @@ vector<float>* StdinReader::getFrames(unsigned frameCount, bool &forceStop)
     return frames;
 }
 
-AudioFormat* StdinReader::getFormat()
+AudioFormat* AlsaReader::getFormat()
 {
     AudioFormat* format = new AudioFormat;
     format->sampleRate = STREAM_SAMPLE_RATE;

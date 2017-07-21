@@ -40,28 +40,26 @@
 #include "error_reporter.h"
 
 #define MAX_STREAM_SIZE 2097152
-#define STREAM_SAMPLE_RATE 22050
+#define STREAM_SAMPLE_RATE 44100
 #define STREAM_BITS_PER_SAMPLE 16
 #define STREAM_CHANNELS 1
 
 using std::vector;
 
-class StdinReader
+class AlsaReader
 {
-    public:
-        virtual ~StdinReader();
-
+ public:
+        virtual ~AlsaReader();
         pthread_t thread;
         vector<float>* getFrames(unsigned frameCount, bool &forceStop);
         AudioFormat* getFormat();
-
-        static StdinReader* getInstance();
-    //private:
-        StdinReader();
-
+        static AlsaReader* getInstance(string alsaDevice);
         static vector<char> stream;
+ private:
+        AlsaReader(string alsaDevice);
         static void* readStdin(void* params);
         static bool doStop, isDataAccess, isReading;
+        static string alsaDevice_;
 };
 
 #endif // STDIN_READER_H

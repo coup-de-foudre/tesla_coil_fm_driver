@@ -53,11 +53,11 @@ class Transmitter {
  public:
     virtual ~Transmitter();
 
-    void play(string filename, double frequencyMHz, double spreadMHz, bool loop);
+    void play(string filename, string alsaDevice, double frequencyMHz, double spreadMHz, bool loop);
     void stop();
 
     static Transmitter* getInstance();
-    static AudioFormat* getFormat(string filename);
+    static AudioFormat* getFormat(string filename, string alsaDevice);
 
 private:
     Transmitter();

@@ -33,7 +33,7 @@
 
 #include "transmitter.h"
 #include "wave_reader.h"
-#include "stdin_reader.h"
+#include "alsa_reader.h"
 #include "peripherals.h"
 #include <sstream>
 #include <unistd.h>
@@ -333,9 +333,10 @@ void Transmitter::setSpreadMHz(double spreadMHz) {
 }
 
 /**
- * Play from stdin or a file
+ * Play from ALSA device or a file
  */
 void Transmitter::play(string filename,
+                       string alsaDevice,
                        double centerFreqMHz,
                        double spreadMHz,
                        bool loop)
@@ -351,59 +352,48 @@ void Transmitter::play(string filename,
     }
 
     WaveReader* waveReader = NULL;
-    StdinReader* stdinReader = NULL;
+    AlsaReader* alsaReader = NULL;
     AudioFormat* format;
-    bool readStdin = filename == "-";
+    bool readAlsa = (filename == "-");
 
     centerFreqMHz_ = centerFreqMHz;
     spreadMHz_ = spreadMHz;
     clkInitSoft();
 
     doStop = false;
-    if (!readStdin) {
+    if (!readAlsa) {
         waveReader = new WaveReader(filename);
         format = waveReader->getFormat();
     } else {
-        stdinReader = StdinReader::getInstance();
-        format = stdinReader->getFormat();
+        alsaReader = AlsaReader::getInstance(alsaDevice);
+        format = alsaReader->getFormat();
         usleep(STDIN_READ_DELAY);
     }
 
 
     unsigned bufferFrames = (unsigned)((unsigned long long)format->sampleRate * BUFFER_TIME / 1000000);
 
-    buffer_ = (!readStdin) ? waveReader->getFrames(bufferFrames, 0) : stdinReader->getFrames(bufferFrames, doStop);
+    buffer_ = (!readAlsa) ? waveReader->getFrames(bufferFrames, 0) : alsaReader->getFrames(bufferFrames, doStop);
 
     std::thread activeThread (Transmitter::transmit, format->sampleRate);
 
 //    usleep(BUFFER_TIME / 2);
 
     bool doPlay = true;
-StdinReader::stream.clear();
+    AlsaReader::stream.clear();
     while (doPlay && !doStop) {
-        while ((readStdin || !waveReader->isEnd((unsigned int) (frameOffset_ + bufferFrames))) && !doStop) {
+        while ((readAlsa || !waveReader->isEnd((unsigned int) (frameOffset_ + bufferFrames))) && !doStop) {
             if (buffer_ == NULL) {
-                if (!readStdin) {
+                if (!readAlsa) {
                     buffer_ = waveReader->getFrames(bufferFrames, (unsigned int) (frameOffset_ + bufferFrames));
                 } else {
-                    buffer_ = stdinReader->getFrames(bufferFrames, doStop);
+                    buffer_ = alsaReader->getFrames(bufferFrames, doStop);
                 }
             }
-            LOG_DEBUG << "Sleeping" ;
 //            usleep(BUFFER_TIME / 2);
 		usleep(1);
-
-            LOG_DEBUG << "frameOffset_=" << frameOffset_
-                      << ", bufferFrames=" << bufferFrames;
         }
-        LOG_DEBUG << "broke out"
-                  << ": frameOffset_=" << frameOffset_
-                  << ", bufferFrames=" << bufferFrames;
-
-        if (loop && !readStdin && !doStop) {
-
-            LOG_DEBUG << "Looping...";
-
+        if (loop && !readAlsa && !doStop) {
             isTransmitting_ = false;
             activeThread.join();
             buffer_ = waveReader->getFrames(bufferFrames, 0);
@@ -420,7 +410,7 @@ StdinReader::stream.clear();
     activeThread.join();
     LOG_DEBUG << "Transmit thread finished";
 
-    if (!readStdin) {
+    if (!readAlsa) {
         delete waveReader;
     }
     delete format;
@@ -502,10 +492,10 @@ void* Transmitter::transmit(unsigned sampleRate)
     return NULL;
 }
 
-AudioFormat* Transmitter::getFormat(string filename)
+AudioFormat* Transmitter::getFormat(string filename, string alsaDevice)
 {
     WaveReader* file = NULL;
-    StdinReader* stdinReader = NULL;
+    AlsaReader* alsaReader = NULL;
     AudioFormat* format = NULL;
 
    if (filename != "-") {
@@ -513,8 +503,8 @@ AudioFormat* Transmitter::getFormat(string filename)
         format = file->getFormat();
         delete file;
     } else {
-        stdinReader = StdinReader::getInstance();
-        format = stdinReader->getFormat();
+        alsaReader = AlsaReader::getInstance(alsaDevice);
+        format = alsaReader->getFormat();
     }
 
    return format;

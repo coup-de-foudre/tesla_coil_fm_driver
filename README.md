@@ -17,39 +17,47 @@ but this makes possible to run it on all kind of boards.
 To compile this project use commands below:
 ```
 sudo apt-get install make gcc g++
+make packages
 make
 ``` 
 
+Additional remakes can be triggered using just `make` or `make clean && make`.
+
 Then you can use it by typing:
 ```
-sudo ./fm_transmitter [-f frequencyMHz=100.0] [-s spreadMHz=0.078] [-r {loop if set}] [-v {verbose logging if set}] filename
+sudo ./fm_transmitter [-f frequencyMHz=100.0] [-s spreadMHz=0.078] [-r {loop if set}] [-v {verbose logging if set}] [-d alsa-device] filename
 ```
 
-### WAVE Files
-You can open WAVE files or read audio data from stdin, i.e.:
+For example, to read the `star_wars.wav` WAV file, use
+
 ```
-sox star_wars.wav -r 22050 -c 1 -b 16 -t wav - | sudo ./fm_transmitter -f 100.1 -
+sudo ./fm_transmitter -f 100.1 -s 0.078 star_wars.wav
 ```
 
-### USB sound-card
-To use a USB sound-card type this:
+
+### ALSA sound-card
+
+We can also read from an ALSA sound card. For example, a USB sound card will usually
+just work if you type
+
 ```
-arecord -D hw:1,0 -c1 -d 0 -r 22050 -f S16_LE | sudo ./fm_transmitter -f 100.6 -
+sudo ./fm_transmitter -f 100.6 -
 ```
-Some devices have problems with the one up (there is a warning in the terminal 
-like ``` buffer overflow ``` after a few seconds - the transmitting is slow and 
-will stop), then you can use the following:
+
+If you need to change the device number (e.g., you have multiple sound cards),
+then you can change the device:
+
 ```
-arecord -D plughw:1,0 -c1 -d 0 -r 22050 -f S16_LE | sudo ./fm_transmitter -f 100.6 -
+sudo ./fm_transmitter -f 100.1 -d plughw:1,0 -
 ```
+
+The available device numbers can be found using `arecord -l`. 
+
+  > Note, a slightly faster sound card may be available using `hw:1,0` instead 
+  > of `plughw:1,0`. The difference is that `hw` does not do any software 
+  > resampling, so it may fail if the sampling rate (44.1kHz) is not hardware 
+  > supported.
 
 ## Law
 Please keep in mind that transmitting on certain frequencies without special 
 permissions may be illegal in your country.
-
-## New features
-
-* works on RPi 1, 2 and 3
-* reads mono and stereo files (only plays mono)
-* reads data from stdin
-* based on threads
