@@ -69,7 +69,7 @@ unsigned Transmitter::clockOffsetAddr_ = CM_GP0CTL;
 
 // TODO: Not hard coded?
 const double softOffDifferenceMHz_ = 0.050; // 250kHz off the center is "soft off"
-const unsigned slewTimeMicroseconds_ = 1000000; // 1 second on/off slew
+const unsigned slewTimeMicroseconds_ = 3000000; // 1 second on/off slew
 
 // Pause between frequency updates to avoid overloading the clock manager
 const unsigned updateDelayMicroseconds_ = 10; // 100 kHz updates
@@ -146,6 +146,10 @@ Transmitter::Transmitter()
 Transmitter::~Transmitter()
 {
     LOG_DEBUG << "Deleting transmitter";
+    if (isTransmitting_ || !doStop) {
+        LOG_DEBUG << "Shutting transmitter down before unmapping peripherals";
+        this->stop();
+    }
     munmap((void*)mmapPeripherals_, PERIPHERALS_LENGTH);
 }
 
@@ -497,7 +501,6 @@ void Transmitter::stop()
 {
     doStop = true;
     isTransmitting_ = false;
-    usleep(100);
     clkShutdownSoft();
 }
 
