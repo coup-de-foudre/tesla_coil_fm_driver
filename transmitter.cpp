@@ -68,7 +68,7 @@ unsigned Transmitter::clockOffsetAddr_ = CM_GP0CTL;
 
 
 // TODO: Not hard coded?
-const double softOffDifferenceMHz_ = 0.250; // 250kHz off the center is "soft off"
+const double softOffDifferenceMHz_ = 0.050; // 250kHz off the center is "soft off"
 const unsigned slewTimeMicroseconds_ = 1000000; // 1 second on/off slew
 
 // Pause between frequency updates to avoid overloading the clock manager
@@ -376,9 +376,6 @@ void Transmitter::play(string filename,
     buffer_ = (!readAlsa) ? waveReader->getFrames(bufferFrames, 0) : alsaReader->getFrames(bufferFrames, doStop);
 
     std::thread activeThread (Transmitter::transmit, format->sampleRate);
-
-//    usleep(BUFFER_TIME / 2);
-
     bool doPlay = true;
     AlsaReader::stream.clear();
     while (doPlay && !doStop) {
@@ -390,8 +387,7 @@ void Transmitter::play(string filename,
                     buffer_ = alsaReader->getFrames(bufferFrames, doStop);
                 }
             }
-//            usleep(BUFFER_TIME / 2);
-		usleep(1);
+            usleep(1);
         }
         if (loop && !readAlsa && !doStop) {
             isTransmitting_ = false;
@@ -400,7 +396,6 @@ void Transmitter::play(string filename,
             frameOffset_ = 0;
             std::thread newThread (Transmitter::transmit, format->sampleRate);
             newThread.swap(activeThread);
-
         } else {
             doPlay = false;
         }
@@ -425,7 +420,6 @@ void* Transmitter::transmit(unsigned sampleRate)
     vector<float>* frames = NULL;
     double value;
     float* data;
-    //unsigned sampleRate = *(unsigned*)(params);
 
     LOG_DEBUG << "Starting transmitter with sample rate " << sampleRate;
     frameOffset_ = 0;
@@ -452,31 +446,23 @@ void* Transmitter::transmit(unsigned sampleRate)
         currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
         frameOffset_ = (currentMicroseconds - playbackStartMicroseconds) * (sampleRate) / 1000000;
 
-        LOG_DEBUG << "Got new frame: " << frames
-                  << ", buffer_=" << buffer_;
-
         length = frames->size();
         data = &(*frames)[0];
 
+        // Transmit entire buffer
         offset = 0;
-
-        while (true) {
+        while (offset < length) {
             temp = offset;
-            if (offset >= length) {
-                offset -= length;
-                break;
-            }
-
             value = data[offset];
 
             // Clip value
             value = (value < -1.0) ? -1.0 : ((value > 1.0) ? 1.0 : value);
             setTransmitValue(value);
 
+            // Spin-wait until next sample time passes
             while (temp >= offset) {
-                asm("nop");  // Super tight timing loop will run CPU at full blast
+                asm("nop");
                 currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
-
                 offset = ((currentMicroseconds - startMicroseconds) * (sampleRate)) / 1000000;
             }
         }
