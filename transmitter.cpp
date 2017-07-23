@@ -370,21 +370,18 @@ void Transmitter::play(string filename,
         usleep(STDIN_READ_DELAY);
     }
 
-
-    unsigned bufferFrames = (unsigned)((unsigned long long)format->sampleRate * BUFFER_TIME / 1000000);
-
-    buffer_ = (!readAlsa) ? waveReader->getFrames(bufferFrames, 0) : alsaReader->getFrames(bufferFrames, doStop);
+    buffer_ = (!readAlsa) ? waveReader->getFrames(BUFFER_FRAMES, 0) : alsaReader->getFrames(BUFFER_FRAMES, doStop);
 
     std::thread activeThread (Transmitter::transmit, format->sampleRate);
     bool doPlay = true;
     AlsaReader::stream.clear();
     while (doPlay && !doStop) {
-        while ((readAlsa || !waveReader->isEnd((unsigned int) (frameOffset_ + bufferFrames))) && !doStop) {
+        while ((readAlsa || !waveReader->isEnd((unsigned int) (frameOffset_ + BUFFER_FRAMES))) && !doStop) {
             if (buffer_ == NULL) {
                 if (!readAlsa) {
-                    buffer_ = waveReader->getFrames(bufferFrames, (unsigned int) (frameOffset_ + bufferFrames));
+                    buffer_ = waveReader->getFrames(BUFFER_FRAMES, (unsigned int) (frameOffset_ + BUFFER_FRAMES));
                 } else {
-                    buffer_ = alsaReader->getFrames(bufferFrames, doStop);
+                    buffer_ = alsaReader->getFrames(BUFFER_FRAMES, doStop);
                 }
             }
             usleep(1);
@@ -392,7 +389,7 @@ void Transmitter::play(string filename,
         if (loop && !readAlsa && !doStop) {
             isTransmitting_ = false;
             activeThread.join();
-            buffer_ = waveReader->getFrames(bufferFrames, 0);
+            buffer_ = waveReader->getFrames(BUFFER_FRAMES, 0);
             frameOffset_ = 0;
             std::thread newThread (Transmitter::transmit, format->sampleRate);
             newThread.swap(activeThread);
