@@ -40,10 +40,9 @@
 #include <thread>
 #include <mutex>
 
+#define BUFFER_FRAMES 2048
+
 using std::vector;
-
-#define BUFFER_TIME 100000
-
 using std::string;
 
 class Transmitter {
