@@ -61,7 +61,12 @@ The available device numbers can be found using `arecord -l`.
 ## Daemonization
 
 If you want this to be run on startup, copy the file "./system_configuration/fm_transmitter.service" to /lib/systemd/system/ 
+then, on the pi:
+```
+sudo systemctl enable fm_transmitter.service
+sudo systemctl start fm_transmitter.service
 
+```
 ## Law
 Please keep in mind that transmitting on certain frequencies without special 
 permissions may be illegal in your country.

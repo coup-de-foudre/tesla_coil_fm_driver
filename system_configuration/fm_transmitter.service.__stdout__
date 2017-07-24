@@ -2,8 +2,10 @@
 Description=CDF FM Transmitter
  
 [Service]
-ExecStart=/home/pi/FM_transmitter/fm_transmitter
+ExecStart=/home/pi/FM_transmitter/fm_transmitter -f 89.1 -s 0.078 - 
 StandardOutput=null
+Restart=always
+RestartSec=3
  
 [Install]
 WantedBy=multi-user.target
