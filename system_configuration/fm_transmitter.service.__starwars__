@@ -3,7 +3,6 @@ Description=CDF FM Transmitter
  
 [Service]
 ExecStart=/home/pi/FM_transmitter/fm_transmitter -f 89.1 -s 0.078 /home/pi/FM_transmitter/star_wars.wav 
-StandardOutput=null
 Restart=always
 RestartSec=3
  

@@ -60,13 +60,36 @@ The available device numbers can be found using `arecord -l`.
 
 ## Daemonization
 
-If you want this to be run on startup, copy the file "./system_configuration/fm_transmitter.service" to /lib/systemd/system/ 
+If you want this to be run on startup, copy one of the config files in system_configuration into /lib/systemd/system/fm_transmitter.service (no extension)
+There are two files in there, one will play starwars, the other stdout.
+ 
 then, on the pi:
 ```
 sudo systemctl enable fm_transmitter.service
 sudo systemctl start fm_transmitter.service
-
 ```
+
+The Pi should start to broadcast, and will restart when the program ends, and on boot. 
+
+Should you want to edit the options passed to fm_transmitter, you can by editing the ExecStart line in fm_transmitter.service
+
+### Useful Systemd Commands:
+
+#### Job Control
+```systemctl start fm_transmitter``` - start process
+```systemctl stop fm_transmitter``` - graceful stop process - this usually works
+```systemctl kill fm_transmitter`` - kill process
+```sudo systemctl restart fm_transmitter``` - restart service manually ( it will restart by itself on process exit)
+
+#### Status
+```systemctl``` - list all systemd services, you should see fm_transmitter in here
+```systemctl | grep fm_transmitter``` - terser way of seeing if fm_transmitter is running
+```systemctl status fm_transmitter``` - See detailed status for fm_transmitter
+```sudo journalctl -u fm_transmitter``` - See ouput of fm_transmitter
+
+#### Development`
+```sudo systemctl daemon-reload``` - reload config after editing (follow with systemctl restart)
+
 ## Law
 Please keep in mind that transmitting on certain frequencies without special 
 permissions may be illegal in your country.
