@@ -58,6 +58,11 @@ The available device numbers can be found using `arecord -l`.
   > resampling, so it may fail if the sampling rate (44.1kHz) is not hardware 
   > supported.
 
+## Daemonization
+
+If you want this to be run on startup, copy the file "./system_configuration/fm_transmitter.service" to /lib/systemd/system/ 
+
 ## Law
 Please keep in mind that transmitting on certain frequencies without special 
 permissions may be illegal in your country.
+

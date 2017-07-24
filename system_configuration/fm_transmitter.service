@@ -1,0 +1,11 @@
+[Unit]
+Description=CDF FM Transmitter
+ 
+[Service]
+ExecStart=/home/pi/FM_transmitter/fm_transmitter
+StandardOutput=null
+ 
+[Install]
+WantedBy=multi-user.target
+Alias=fm_transmitter.service
+
