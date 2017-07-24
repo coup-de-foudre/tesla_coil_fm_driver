@@ -77,14 +77,20 @@ Should you want to edit the options passed to fm_transmitter, you can by editing
 
 #### Job Control
 ```systemctl start fm_transmitter``` - start process
+
 ```systemctl stop fm_transmitter``` - graceful stop process - this usually works
-```systemctl kill fm_transmitter`` - kill process
+
+```systemctl kill fm_transmitter``` - kill process
+
 ```sudo systemctl restart fm_transmitter``` - restart service manually ( it will restart by itself on process exit)
 
 #### Status
 ```systemctl``` - list all systemd services, you should see fm_transmitter in here
+
 ```systemctl | grep fm_transmitter``` - terser way of seeing if fm_transmitter is running
+
 ```systemctl status fm_transmitter``` - See detailed status for fm_transmitter
+
 ```sudo journalctl -u fm_transmitter``` - See ouput of fm_transmitter
 
 #### Development`
