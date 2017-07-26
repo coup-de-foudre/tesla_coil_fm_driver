@@ -33,20 +33,82 @@
 
 #include "alsa_reader.h"
 #include "error_reporter.h"
+#include "plog/Log.h"
 #include <sstream>
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
 #include <alsa/asoundlib.h>
+#include <boost/lockfree/spsc_queue.hpp>
 
-
+namespace bl = boost::lockfree;
 using std::ostringstream;
 
 bool AlsaReader::doStop = false;
 bool AlsaReader::isReading = false;
 bool AlsaReader::isDataAccess = false;
-vector<char> AlsaReader::stream;
+vector<float> AlsaReader::stream;
 std::string AlsaReader::alsaDevice_ = "plughw:1,0";
+
+
+int AlsaReader::setParams(snd_pcm_t* &capture_handle) {
+    int err;
+    snd_pcm_hw_params_t *hw_params;
+    unsigned int rate = STREAM_SAMPLE_RATE;
+
+    if ((err = snd_pcm_open (&capture_handle, alsaDevice_.c_str(), SND_PCM_STREAM_CAPTURE, 0)) < 0) {
+        LOG_ERROR <<  "cannot open audio device " << alsaDevice_ << " in blocking mode: " << snd_strerror(err);
+        return err;
+    }
+
+    if ((err = snd_pcm_hw_params_malloc (&hw_params)) < 0) {
+        LOG_ERROR << "cannot allocate hardware parameter structure: " << snd_strerror(err);
+        return err;
+    }
+
+    if ((err = snd_pcm_hw_params_any (capture_handle, hw_params)) < 0) {
+        LOG_ERROR <<  "cannot initialize hardware parameter structure: " << snd_strerror(err);
+        return err;
+    }
+
+    if ((err = snd_pcm_hw_params_set_access (capture_handle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
+        LOG_ERROR <<  "cannot set access type: " << snd_strerror(err);
+        return err;
+    }
+    if ((err = snd_pcm_hw_params_set_format (capture_handle, hw_params, SND_PCM_FORMAT_FLOAT_LE)) < 0) {
+        LOG_ERROR <<  "cannot set sample format: " << snd_strerror(err);
+        return err;
+    }
+
+    unsigned int rrate = rate;
+    if ((err = snd_pcm_hw_params_set_rate_near (capture_handle, hw_params, &rrate, 0)) < 0) {
+        LOG_ERROR << "cannot set sample rate: " << snd_strerror(err);
+        return err;
+    }
+
+    if (rrate != rate) {
+        LOG_ERROR << "rate does not match: requested " << rate << "Hz, got " << rrate << "Hz";
+        return -EINVAL;
+    }
+
+    if ((err = snd_pcm_hw_params_set_channels (capture_handle, hw_params, 1)) < 0) {
+        LOG_ERROR << "cannot set channel count: " << snd_strerror (err);
+        return err;
+    }
+
+    if ((err = snd_pcm_hw_params (capture_handle, hw_params)) < 0) {
+        LOG_ERROR << "cannot set parameters: " << snd_strerror (err);
+        return err;
+    }
+
+    snd_pcm_hw_params_free (hw_params);
+
+    if ((err = snd_pcm_prepare (capture_handle)) < 0) {
+        LOG_ERROR <<  "cannot prepare audio interface for use: " << snd_strerror (err);
+        return err;
+    }
+    return 0;
+}
 
 AlsaReader::AlsaReader(std::string alsaDevice)
 {
@@ -63,11 +125,13 @@ AlsaReader::AlsaReader(std::string alsaDevice)
     }
 }
 
+
 AlsaReader::~AlsaReader()
 {
     doStop = true;
     pthread_join(thread, NULL);
 }
+
 
 AlsaReader* AlsaReader::getInstance(string alsaDevice)
 {
@@ -75,72 +139,53 @@ AlsaReader* AlsaReader::getInstance(string alsaDevice)
     return &instance;
 }
 
-void *AlsaReader::readStdin(void *params)
-{
-    int err;
-    unsigned int rate = STREAM_SAMPLE_RATE;
+/*
+void* doTheThing() {
+    // PRODUCER
     snd_pcm_t *capture_handle;
-    snd_pcm_hw_params_t *hw_params;
+    bl::spsc_queue<std::vector<float>, bl::capacity<1>> queue;
+    char[ALSA_FRAME_BUFFER_LENGTH * ALSA_FRAME_BYTES] readBuffer; // Fuck your stack.
 
-    if ((err = snd_pcm_open (&capture_handle, alsaDevice_.c_str(), SND_PCM_STREAM_CAPTURE, 0)) < 0) {
-        fprintf (stderr, "cannot open audio device %s (%s)\n",
-             "fd",
-             snd_strerror (err));
-        exit (1);
+    if (setParams(capture_handle)) {
+        LOG_ERROR << "Unable to set ALSA parameters. Exiting.";
+        // TODO: How to ensure transmitter shutdown?
+        return;
     }
 
-    if ((err = snd_pcm_hw_params_malloc (&hw_params)) < 0) {
-        fprintf (stderr, "cannot allocate hardware parameter structure (%s)\n",
-             snd_strerror (err));
-        exit (1);
+    while (!doStop) {
+        int numFrames = snd_pcm_readi(capture_handle, readBuffer, ALSA_FRAME_BUFFER_LENGTH);
+
+        if (numFrames != ALSA_FRAME_BUFFER_LENGTH) {
+            LOG_ERROR << "Asked for " << ALSA_FRAME_BUFFER_LENGTH << " frames, got " << numFrames;
+            continue; // TODO: Recover?
+        }
+
+        std::vector<float> valueBuffer;
+        valueBuffer.reserve(numFrames);
+        for (int i = 0; i < numFrames; i++) {
+            float value = 0.0;
+            const float maxScale = 1 << (4 * ALSA_FRAME_BYTES - 1);
+            for (int j = 0; j < ALSA_FRAME_BYTES; j++) {
+                int scale = 1 << (4 * j - 1);
+                value += scale * (float) readBuffer[ALSA_FRAME_BYTES * i + j];
+            }
+            valueBuffer.push_back(value / maxScale);
+        }
     }
+}
+*/
 
-    if ((err = snd_pcm_hw_params_any (capture_handle, hw_params)) < 0) {
-        fprintf (stderr, "cannot initialize hardware parameter structure (%s)\n",
-             snd_strerror (err));
-        exit (1);
+void* AlsaReader::readStdin(void *params)
+{
+    snd_pcm_t *capture_handle;
+    int err;
+    float *readBuffer = new float[1024];
+
+    if ((err = setParams(capture_handle)) != 0) {
+        LOG_ERROR << "Exiting" ;
+        usleep(1000);
+        exit(1);
     }
-
-    if ((err = snd_pcm_hw_params_set_access (capture_handle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
-        fprintf (stderr, "cannot set access type (%s)\n",
-             snd_strerror (err));
-        exit (1);
-    }
-
-    if ((err = snd_pcm_hw_params_set_format (capture_handle, hw_params, SND_PCM_FORMAT_S16_LE)) < 0) {
-        fprintf (stderr, "cannot set sample format (%s)\n",
-             snd_strerror (err));
-        exit (1);
-    }
-
-    if ((err = snd_pcm_hw_params_set_rate_near (capture_handle, hw_params, &rate, 0)) < 0) {
-        fprintf (stderr, "cannot set sample rate (%s)\n",
-             snd_strerror (err));
-        exit (1);
-    }
-
-    if ((err = snd_pcm_hw_params_set_channels (capture_handle, hw_params, 1)) < 0) {
-        fprintf (stderr, "cannot set channel count (%s)\n",
-             snd_strerror (err));
-        exit (1);
-    }
-
-    if ((err = snd_pcm_hw_params (capture_handle, hw_params)) < 0) {
-        fprintf (stderr, "cannot set parameters (%s)\n",
-             snd_strerror (err));
-        exit (1);
-    }
-
-    snd_pcm_hw_params_free (hw_params);
-
-    if ((err = snd_pcm_prepare (capture_handle)) < 0) {
-        fprintf (stderr, "cannot prepare audio interface for use (%s)\n",
-             snd_strerror (err));
-        exit (1);
-    }
-
-
-    char *readBuffer = new char[1024];
 
     while (!doStop) {
         isReading = true;
@@ -154,10 +199,10 @@ void *AlsaReader::readStdin(void *params)
         unsigned streamSize = (unsigned int) stream.size();
         if (streamSize < MAX_STREAM_SIZE) {
 		    int _len = (streamSize + 1024 > MAX_STREAM_SIZE) ? MAX_STREAM_SIZE - streamSize : 1024;
-    		int bytes = snd_pcm_readi(capture_handle, readBuffer, _len / 2) * 2; // /2 and *2 because snd_pcm_readi works in units of 16bit frames
+    		int numFrames = snd_pcm_readi(capture_handle, readBuffer, _len);
 
-            if (bytes > 0) {
-                stream.insert(stream.end(), readBuffer, readBuffer + bytes);
+            if (numFrames > 0) {
+                stream.insert(stream.end(), readBuffer, readBuffer + numFrames);
             }
         }
 
@@ -190,7 +235,13 @@ vector<float>* AlsaReader::getFrames(unsigned frameCount, bool &forceStop)
         return NULL;
     }
 
-    vector<float> *frames = new vector<float>();
+    if (streamSize < frameCount) {
+        frameCount = streamSize;
+    }
+    vector<float>::const_iterator first = stream.begin();
+    vector<float>::const_iterator last = stream.begin() + frameCount;
+    vector<float> *frames = new vector<float>(first, last);
+
     bytesPerFrame = (STREAM_BITS_PER_SAMPLE >> 3) * STREAM_CHANNELS;
     bytesToRead = frameCount * bytesPerFrame;
 
@@ -204,24 +255,6 @@ vector<float>* AlsaReader::getFrames(unsigned frameCount, bool &forceStop)
     memcpy(&(data[0]), &(stream[0]), bytesToRead);
     stream.erase(stream.begin(), stream.begin() + bytesToRead);
     isDataAccess = false;
-
-    for (unsigned i = 0; i < frameCount; i++) {
-        offset = bytesPerFrame * i;
-        if (STREAM_CHANNELS != 1) {
-            if (STREAM_BITS_PER_SAMPLE != 8) {
-                frames->push_back(((int)(signed char)data[offset + 1] + (int)(signed char)data[offset + 3]) / (float)0x100);
-            } else {
-                frames->push_back(((int)data[offset] + (int)data[offset + 1]) / (float)0x100 - 1.0f);
-            }
-        } else {
-            if (STREAM_BITS_PER_SAMPLE != 8) {
-                frames->push_back((signed char)data[offset + 1] / (float)0x80);
-            } else {
-                frames->push_back(data[offset] / (float)0x80 - 1.0f);
-            }
-        }
-    }
-
     return frames;
 }
 

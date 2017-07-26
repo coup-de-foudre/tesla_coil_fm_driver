@@ -36,6 +36,7 @@
 
 #include <vector>
 #include <fcntl.h>
+#include <alsa/asoundlib.h>
 #include "audio_format.h"
 #include "error_reporter.h"
 
@@ -43,6 +44,8 @@
 #define STREAM_SAMPLE_RATE 44100
 #define STREAM_BITS_PER_SAMPLE 16
 #define STREAM_CHANNELS 1
+#define ALSA_FRAME_BUFFER_LENGTH 1024
+#define ALSA_FRAME_BYTES 2
 
 using std::vector;
 
@@ -54,9 +57,10 @@ class AlsaReader
         vector<float>* getFrames(unsigned frameCount, bool &forceStop);
         AudioFormat* getFormat();
         static AlsaReader* getInstance(string alsaDevice);
-        static vector<char> stream;
+        static vector<float> stream;
  private:
         AlsaReader(string alsaDevice);
+        static int setParams(snd_pcm_t* &);
         static void* readStdin(void* params);
         static bool doStop, isDataAccess, isReading;
         static string alsaDevice_;
