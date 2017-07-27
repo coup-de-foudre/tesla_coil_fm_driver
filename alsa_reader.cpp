@@ -39,16 +39,18 @@
 #include <string.h>
 #include <fcntl.h>
 #include <alsa/asoundlib.h>
-#include <boost/lockfree/spsc_queue.hpp>
+#include <atomic>
+#include <boost/lockfree/queue.hpp>
 
 namespace bl = boost::lockfree;
 using std::ostringstream;
 
 bool AlsaReader::doStop = false;
-bool AlsaReader::isReading = false;
 bool AlsaReader::isDataAccess = false;
 vector<float> AlsaReader::stream;
 std::string AlsaReader::alsaDevice_ = "plughw:1,0";
+
+boost::lockfree::queue<std::vector<float>*> AlsaReader::queue(1);
 
 
 int AlsaReader::setParams(snd_pcm_t* &capture_handle) {
@@ -110,18 +112,15 @@ int AlsaReader::setParams(snd_pcm_t* &capture_handle) {
     return 0;
 }
 
+
 AlsaReader::AlsaReader(std::string alsaDevice)
 {
     alsaDevice_ = alsaDevice;
-    int returnCode = pthread_create(&thread, NULL, &AlsaReader::readStdin, NULL);
+    int returnCode = pthread_create(&thread, NULL, &AlsaReader::read, NULL);
     if (returnCode) {
         ostringstream oss;
         oss << "Cannot create new thread (code: " << returnCode << ")";
         throw ErrorReporter(oss.str());
-    }
-
-    while (!isReading) {
-        usleep(1);
     }
 }
 
@@ -139,41 +138,52 @@ AlsaReader* AlsaReader::getInstance(string alsaDevice)
     return &instance;
 }
 
-/*
-void* doTheThing() {
+
+void* AlsaReader::read(void* params) {
     // PRODUCER
     snd_pcm_t *capture_handle;
-    bl::spsc_queue<std::vector<float>, bl::capacity<1>> queue;
-    char[ALSA_FRAME_BUFFER_LENGTH * ALSA_FRAME_BYTES] readBuffer; // Fuck your stack.
+    unsigned bufferLength = ALSA_FRAME_BUFFER_LENGTH;
+    float* readBuffer = new float[bufferLength];
 
     if (setParams(capture_handle)) {
         LOG_ERROR << "Unable to set ALSA parameters. Exiting.";
-        // TODO: How to ensure transmitter shutdown?
-        return;
+        doStop = 1;
     }
 
     while (!doStop) {
-        int numFrames = snd_pcm_readi(capture_handle, readBuffer, ALSA_FRAME_BUFFER_LENGTH);
+        int numFrames = snd_pcm_readi(capture_handle, readBuffer, bufferLength);
 
-        if (numFrames != ALSA_FRAME_BUFFER_LENGTH) {
-            LOG_ERROR << "Asked for " << ALSA_FRAME_BUFFER_LENGTH << " frames, got " << numFrames;
-            continue; // TODO: Recover?
+        if (numFrames < 0) {
+            LOG_ERROR << "Error reading from ALSA device: " << snd_strerror(numFrames);
+            doStop = 1;
+            break;
+        } else if ((unsigned)numFrames != bufferLength) {
+            LOG_ERROR << "Asked for " << bufferLength << " frames, got " << numFrames;
+            doStop = 1;
+            break;
         }
 
-        std::vector<float> valueBuffer;
-        valueBuffer.reserve(numFrames);
-        for (int i = 0; i < numFrames; i++) {
-            float value = 0.0;
-            const float maxScale = 1 << (4 * ALSA_FRAME_BYTES - 1);
-            for (int j = 0; j < ALSA_FRAME_BYTES; j++) {
-                int scale = 1 << (4 * j - 1);
-                value += scale * (float) readBuffer[ALSA_FRAME_BYTES * i + j];
-            }
-            valueBuffer.push_back(value / maxScale);
+        std::vector<float>* values = new std::vector<float>(readBuffer, readBuffer + bufferLength);
+
+        // Drain buffer
+        std::atomic<int> numConsumed(0);
+        queue.consume_all([&numConsumed] (vector<float>* element) -> void {
+                numConsumed++;
+                delete element;
+            });
+        if (numConsumed > 0) {
+            LOG_DEBUG << "Buffer drain conusmed " << numConsumed << " frames";
+        }
+        while( !queue.unsynchronized_push(values) ) {
+            LOG_WARNING << "Unable to add to queue? Retrying.";
         }
     }
+
+    delete readBuffer;
+
+    return NULL;
 }
-*/
+
 
 void* AlsaReader::readStdin(void *params)
 {
@@ -188,8 +198,6 @@ void* AlsaReader::readStdin(void *params)
     }
 
     while (!doStop) {
-        isReading = true;
-
         while (isDataAccess && !doStop) {
             usleep(1);
         }
@@ -205,9 +213,6 @@ void* AlsaReader::readStdin(void *params)
                 stream.insert(stream.end(), readBuffer, readBuffer + numFrames);
             }
         }
-
-        isReading = false;
-        usleep(1);
     }
 
     delete readBuffer;
@@ -218,6 +223,13 @@ void* AlsaReader::readStdin(void *params)
 
 vector<float>* AlsaReader::getFrames(unsigned frameCount, bool &forceStop)
 {
+    vector<float>* result;
+    while ( !queue.pop(result) ) {
+        usleep(1);
+    }
+    return result;
+
+    /*
     while (isReading && !forceStop) {
         usleep(1);
     }
@@ -256,6 +268,7 @@ vector<float>* AlsaReader::getFrames(unsigned frameCount, bool &forceStop)
     stream.erase(stream.begin(), stream.begin() + bytesToRead);
     isDataAccess = false;
     return frames;
+    */
 }
 
 AudioFormat* AlsaReader::getFormat()

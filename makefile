@@ -1,11 +1,11 @@
-CFLAGS += -Wall -fexceptions -pthread -lasound -lm -O3 -fpermissive -fno-strict-aliasing -std=c++14
+CFLAGS += -Wall -fexceptions -pthread -lasound -lboost_atomic -lm -O3 -fpermissive -fno-strict-aliasing -std=c++14
 TARGET = fm_transmitter
 SHELL = /bin/bash
 CPP=$(CCPREFIX)g++
 
 INCLUDE=-I./include -I/usr/lib/gcc/arm-linux-gnueabihf/4.9/include -I/usr/local/include -I/usr/lib/gcc/arm-linux-gnueabihf/4.9/include-fixed -I/usr/include/arm-linux-gnueabihf -I/usr/include
 
-PACKAGES=libasound2-dev
+PACKAGES=libasound2-dev libboost1.55-all-dev
 
 $(TARGET): main.o error_reporter.o wave_reader.o alsa_reader.o transmitter.o
 	$(CPP) $(CFLAGS) $(INCLUDE) -o $(TARGET) main.o error_reporter.o wave_reader.o alsa_reader.o transmitter.o

@@ -37,6 +37,8 @@
 #include <vector>
 #include <fcntl.h>
 #include <alsa/asoundlib.h>
+#include <boost/lockfree/queue.hpp>
+
 #include "audio_format.h"
 #include "error_reporter.h"
 
@@ -45,7 +47,6 @@
 #define STREAM_BITS_PER_SAMPLE 16
 #define STREAM_CHANNELS 1
 #define ALSA_FRAME_BUFFER_LENGTH 1024
-#define ALSA_FRAME_BYTES 2
 
 using std::vector;
 
@@ -57,13 +58,15 @@ class AlsaReader
         vector<float>* getFrames(unsigned frameCount, bool &forceStop);
         AudioFormat* getFormat();
         static AlsaReader* getInstance(string alsaDevice);
-        static vector<float> stream;
  private:
+        static vector<float> stream;
         AlsaReader(string alsaDevice);
+        static void* read(void* params);
         static int setParams(snd_pcm_t* &);
         static void* readStdin(void* params);
         static bool doStop, isDataAccess, isReading;
         static string alsaDevice_;
+        static boost::lockfree::queue<std::vector<float>*> queue;
 };
 
 #endif // STDIN_READER_H
