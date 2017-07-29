@@ -47,10 +47,34 @@ using std::ostringstream;
 
 bool AlsaReader::doStop = false;
 bool AlsaReader::isDataAccess = false;
-vector<float> AlsaReader::stream;
 std::string AlsaReader::alsaDevice_ = "plughw:1,0";
 
 boost::lockfree::queue<std::vector<float>*> AlsaReader::queue(1);
+
+
+AlsaReader::AlsaReader(std::string alsaDevice)
+{
+    alsaDevice_ = alsaDevice;
+    int returnCode = pthread_create(&thread, NULL, &AlsaReader::read, NULL);
+    if (returnCode) {
+        ostringstream oss;
+        oss << "Cannot create new thread (code: " << returnCode << ")";
+        throw ErrorReporter(oss.str());
+    }
+}
+
+
+AlsaReader::~AlsaReader()
+{
+    doStop = true;
+}
+
+
+AlsaReader* AlsaReader::getInstance(string alsaDevice)
+{
+    static AlsaReader instance(alsaDevice);
+    return &instance;
+}
 
 
 int AlsaReader::setParams(snd_pcm_t* &capture_handle) {
@@ -77,6 +101,7 @@ int AlsaReader::setParams(snd_pcm_t* &capture_handle) {
         LOG_ERROR <<  "cannot set access type: " << snd_strerror(err);
         return err;
     }
+
     if ((err = snd_pcm_hw_params_set_format (capture_handle, hw_params, SND_PCM_FORMAT_FLOAT_LE)) < 0) {
         LOG_ERROR <<  "cannot set sample format: " << snd_strerror(err);
         return err;
@@ -113,34 +138,7 @@ int AlsaReader::setParams(snd_pcm_t* &capture_handle) {
 }
 
 
-AlsaReader::AlsaReader(std::string alsaDevice)
-{
-    alsaDevice_ = alsaDevice;
-    int returnCode = pthread_create(&thread, NULL, &AlsaReader::read, NULL);
-    if (returnCode) {
-        ostringstream oss;
-        oss << "Cannot create new thread (code: " << returnCode << ")";
-        throw ErrorReporter(oss.str());
-    }
-}
-
-
-AlsaReader::~AlsaReader()
-{
-    doStop = true;
-    pthread_join(thread, NULL);
-}
-
-
-AlsaReader* AlsaReader::getInstance(string alsaDevice)
-{
-    static AlsaReader instance(alsaDevice);
-    return &instance;
-}
-
-
 void* AlsaReader::read(void* params) {
-    // PRODUCER
     snd_pcm_t *capture_handle;
     unsigned bufferLength = ALSA_FRAME_BUFFER_LENGTH;
     float* readBuffer = new float[bufferLength];
@@ -168,111 +166,45 @@ void* AlsaReader::read(void* params) {
         // Drain buffer
         std::atomic<int> numConsumed(0);
         queue.consume_all([&numConsumed] (vector<float>* element) -> void {
-                numConsumed++;
+                numConsumed += element->size();
                 delete element;
             });
         if (numConsumed > 0) {
             LOG_DEBUG << "Buffer drain conusmed " << numConsumed << " frames";
         }
-        while( !queue.unsynchronized_push(values) ) {
-            LOG_WARNING << "Unable to add to queue? Retrying.";
+        if( !queue.push(values) ) {
+            LOG_WARNING << "Unable to add frames to queue? Giving up.";
         }
     }
 
     delete readBuffer;
-
     return NULL;
 }
 
-
-void* AlsaReader::readStdin(void *params)
-{
-    snd_pcm_t *capture_handle;
-    int err;
-    float *readBuffer = new float[1024];
-
-    if ((err = setParams(capture_handle)) != 0) {
-        LOG_ERROR << "Exiting" ;
-        usleep(1000);
-        exit(1);
+void AlsaReader::stop(bool block = false) {
+    doStop = true;
+    if (block) {
+        pthread_join(thread, NULL);
     }
-
-    while (!doStop) {
-        while (isDataAccess && !doStop) {
-            usleep(1);
-        }
-        if (doStop) {
-            break;
-        }
-        unsigned streamSize = (unsigned int) stream.size();
-        if (streamSize < MAX_STREAM_SIZE) {
-		    int _len = (streamSize + 1024 > MAX_STREAM_SIZE) ? MAX_STREAM_SIZE - streamSize : 1024;
-    		int numFrames = snd_pcm_readi(capture_handle, readBuffer, _len);
-
-            if (numFrames > 0) {
-                stream.insert(stream.end(), readBuffer, readBuffer + numFrames);
-            }
-        }
-    }
-
-    delete readBuffer;
-    snd_pcm_close(capture_handle);
-
-    return NULL;
 }
 
-vector<float>* AlsaReader::getFrames(unsigned frameCount, bool &forceStop)
-{
+/**
+ * Non-blocking thread-safe read for getting a frame from the buffer
+ */
+bool AlsaReader::getFrames(vector<float>* &result) {
+    return queue.pop(result);
+}
+
+vector<float>* AlsaReader::getFrames(unsigned frameCount, bool &forceStop) {
     vector<float>* result;
     while ( !queue.pop(result) ) {
+        LOG_DEBUG << "Unable to get frames: queue empty";
         usleep(1);
     }
     return result;
-
-    /*
-    while (isReading && !forceStop) {
-        usleep(1);
-    }
-    if (forceStop) {
-        doStop = true;
-        return NULL;
-    }
-
-    isDataAccess = true;
-
-    unsigned offset, bytesToRead, bytesPerFrame;
-    unsigned streamSize = (unsigned int) stream.size();
-    if (!streamSize) {
-        isDataAccess = false;
-        return NULL;
-    }
-
-    if (streamSize < frameCount) {
-        frameCount = streamSize;
-    }
-    vector<float>::const_iterator first = stream.begin();
-    vector<float>::const_iterator last = stream.begin() + frameCount;
-    vector<float> *frames = new vector<float>(first, last);
-
-    bytesPerFrame = (STREAM_BITS_PER_SAMPLE >> 3) * STREAM_CHANNELS;
-    bytesToRead = frameCount * bytesPerFrame;
-
-    if (bytesToRead > streamSize) {
-        bytesToRead = streamSize - streamSize % bytesPerFrame;
-        frameCount = bytesToRead / bytesPerFrame;
-    }
-
-    vector<char> data;
-    data.resize(bytesToRead);
-    memcpy(&(data[0]), &(stream[0]), bytesToRead);
-    stream.erase(stream.begin(), stream.begin() + bytesToRead);
-    isDataAccess = false;
-    return frames;
-    */
 }
 
-AudioFormat* AlsaReader::getFormat()
-{
+AudioFormat* AlsaReader::getFormat() {
     AudioFormat* format = new AudioFormat;
     format->sampleRate = STREAM_SAMPLE_RATE;
     format->bitsPerSample = STREAM_BITS_PER_SAMPLE;

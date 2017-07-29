@@ -31,14 +31,15 @@
     WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifndef STDIN_READER_H
-#define STDIN_READER_H
+#ifndef ALSA_READER_H
+#define ALSA_READER_H
 
 #include <vector>
 #include <fcntl.h>
 #include <alsa/asoundlib.h>
 #include <boost/lockfree/queue.hpp>
 
+#include "abstract_reader.h"
 #include "audio_format.h"
 #include "error_reporter.h"
 
@@ -46,27 +47,27 @@
 #define STREAM_SAMPLE_RATE 44100
 #define STREAM_BITS_PER_SAMPLE 16
 #define STREAM_CHANNELS 1
-#define ALSA_FRAME_BUFFER_LENGTH 1024
+#define ALSA_FRAME_BUFFER_LENGTH 512
 
 using std::vector;
 
-class AlsaReader
-{
+class AlsaReader : public AbstractReader {
  public:
         virtual ~AlsaReader();
         pthread_t thread;
         vector<float>* getFrames(unsigned frameCount, bool &forceStop);
+        bool getFrames(vector<float>* &result);
         AudioFormat* getFormat();
+        void stop(bool block);
         static AlsaReader* getInstance(string alsaDevice);
+
  private:
-        static vector<float> stream;
         AlsaReader(string alsaDevice);
         static void* read(void* params);
         static int setParams(snd_pcm_t* &);
-        static void* readStdin(void* params);
         static bool doStop, isDataAccess, isReading;
         static string alsaDevice_;
         static boost::lockfree::queue<std::vector<float>*> queue;
 };
 
-#endif // STDIN_READER_H
+#endif // ALSA_READER_H

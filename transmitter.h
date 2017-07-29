@@ -36,6 +36,7 @@
 
 #include "error_reporter.h"
 #include "audio_format.h"
+#include "abstract_reader.h"
 #include <vector>
 #include <thread>
 #include <mutex>
@@ -55,14 +56,16 @@ class Transmitter {
     void play(string filename, string alsaDevice, double frequencyMHz, double spreadMHz, bool loop);
     void stop();
 
-    static Transmitter* getInstance();
+    static Transmitter* getInstance(AbstractReader* reader);
     static AudioFormat* getFormat(string filename, string alsaDevice);
 
+    static void transmit();
 private:
-    Transmitter();
+    Transmitter(AbstractReader* reader);
 
+    static AbstractReader* reader_;
     static void setTransmitValue(double value);
-    static void* transmit(unsigned sampleRate);
+    static void* transmitThread(unsigned sampleRate);
 
     static unsigned clkSlew(double finalFreqMHz,
                             double startFreqMHz,

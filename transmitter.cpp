@@ -65,7 +65,7 @@ bool Transmitter::doStop = false;
 std::mutex Transmitter::transmitMutex_;
 
 unsigned Transmitter::clockOffsetAddr_ = CM_GP0CTL;
-
+AbstractReader* Transmitter::reader_ = NULL;
 
 // TODO: Not hard coded?
 const double softOffDifferenceMHz_ = 0.050; // 250kHz off the center is "soft off"
@@ -73,49 +73,6 @@ const unsigned slewTimeMicroseconds_ = 3000000; // 1 second on/off slew
 
 // Pause between frequency updates to avoid overloading the clock manager
 const unsigned updateDelayMicroseconds_ = 10; // 100 kHz updates
-
-
-/*
- * Code flow plan:
- *
- * Transmitter::Transmitter()
- *    - Current:
- *        - memory map peripherals
- *    - Should:
- *        x memory map peripherals,
- *        - safely start the clock
- *             :: disable clock
- *             :: set divisor safely before start
- *             :: wait for busy bit to clear
- *             :: enable clock
- *             :: wind transmit frequency to center frequency over period of time
- *
- * Transmitter::~Transmitter()
- *    - Current:
- *        - unmap peripherals
- *    - Should:
- *        - gracefully stop clock
- *            :: wind transmit frequency away from center frequency over period of time
- *            :: disable clock
- *            :: wait for busy bit to clear
- *        - unmap peripherals
- *
- *
- * Transmitter::play()
- *    - Current:
- *        - Reads first frame
- *        - Starts transmit thread with sample rate set
- *        -
-  *    - Should:
- *        - TODO
- *
- * Transmitter::transmit()
- *    - Current:
- *        - enables clock
- *        - sets divisor
- *        - plays sample when enough time passes (if ready)
- *    -
- */
 
 inline void* mmapPeripherals() {
     LOG_DEBUG << "Memory mapping peripherals";
@@ -137,15 +94,18 @@ inline void* mmapPeripherals() {
     return peripheralsBase;
 }
 
-Transmitter::Transmitter()
-{
+Transmitter::Transmitter(AbstractReader* reader) {
     LOG_DEBUG << "Initializing transmitter";
+    reader_ = reader;
     mmapPeripherals_ = mmapPeripherals();
 }
 
-Transmitter::~Transmitter()
-{
+Transmitter::~Transmitter() {
     LOG_DEBUG << "Deleting transmitter";
+    reader_->stop(true);
+    delete reader_;
+    reader_ = NULL;
+
     if (isTransmitting_ || !doStop) {
         LOG_DEBUG << "Shutting transmitter down before unmapping peripherals";
         this->stop();
@@ -153,9 +113,9 @@ Transmitter::~Transmitter()
     munmap((void*)mmapPeripherals_, PERIPHERALS_LENGTH);
 }
 
-Transmitter* Transmitter::getInstance()
+Transmitter* Transmitter::getInstance(AbstractReader* reader)
 {
-    static Transmitter instance;
+    static Transmitter instance(reader);
     return &instance;
 }
 
@@ -336,6 +296,7 @@ void Transmitter::setSpreadMHz(double spreadMHz) {
     return setTransmitValue(currentValue_);
 }
 
+
 /**
  * Play from ALSA device or a file
  */
@@ -376,9 +337,8 @@ void Transmitter::play(string filename,
 
     buffer_ = (!readAlsa) ? waveReader->getFrames(BUFFER_FRAMES, 0) : alsaReader->getFrames(BUFFER_FRAMES, doStop);
 
-    std::thread activeThread (Transmitter::transmit, format->sampleRate);
+    std::thread activeThread (Transmitter::transmitThread, format->sampleRate);
     bool doPlay = true;
-    AlsaReader::stream.clear();
     while (doPlay && !doStop) {
         while ((readAlsa || !waveReader->isEnd((unsigned int) (frameOffset_ + BUFFER_FRAMES))) && !doStop) {
             if (buffer_ == NULL) {
@@ -395,7 +355,7 @@ void Transmitter::play(string filename,
             activeThread.join();
             buffer_ = waveReader->getFrames(BUFFER_FRAMES, 0);
             frameOffset_ = 0;
-            std::thread newThread (Transmitter::transmit, format->sampleRate);
+            std::thread newThread (Transmitter::transmitThread, format->sampleRate);
             newThread.swap(activeThread);
         } else {
             doPlay = false;
@@ -412,7 +372,51 @@ void Transmitter::play(string filename,
     delete format;
 }
 
-void* Transmitter::transmit(unsigned sampleRate)
+
+/**
+ * Transmit all frames from a reader
+ */
+void Transmitter::transmit() {
+    unsigned sampleRateMicroseconds = reader_->getFormat()->sampleRate * 1000000;
+    vector<float>* frames = NULL;
+
+    LOG_DEBUG << "Starting transmitter with sample rate " << sampleRateMicroseconds / 1000000 << "Hz";
+
+    LOG_DEBUG << "Acquiring transmit lock...";
+    transmitMutex_.lock();
+
+    unsigned long nFramesProcessed = 0;
+    const unsigned long long startMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+    while (!doStop) {
+        if (!reader_->getFrames(frames)) {
+            LOG_DEBUG << "Transmit underrun: No frames available";
+            continue;
+        }
+
+        // TODO: Signal processing here
+
+        for (unsigned ii = 0; ii < frames->size(); ii++) {
+            unsigned long long nextFrameTrigger = nFramesProcessed * sampleRateMicroseconds;
+
+            // Spin-wait
+            while (ACCESS64(mmapPeripherals_, ST_CLO) - startMicroseconds <= nextFrameTrigger) {
+                asm("nop");
+            }
+            setTransmitValue((*frames)[ii]);
+            nFramesProcessed++;
+
+            if (doStop) break;
+        }
+
+        delete frames;
+        frames = NULL;
+    }
+    transmitMutex_.unlock();
+    LOG_DEBUG << "Total frames transmitted: " << nFramesProcessed;
+}
+
+
+void* Transmitter::transmitThread(unsigned sampleRate)
 {
     unsigned long long currentMicroseconds, startMicroseconds, playbackStartMicroseconds;
     unsigned long offset;
@@ -477,24 +481,6 @@ void* Transmitter::transmit(unsigned sampleRate)
     LOG_DEBUG << "Transmitter shut down";
     transmitMutex_.unlock();
     return NULL;
-}
-
-AudioFormat* Transmitter::getFormat(string filename, string alsaDevice)
-{
-    WaveReader* file = NULL;
-    AlsaReader* alsaReader = NULL;
-    AudioFormat* format = NULL;
-
-   if (filename != "-") {
-        file = new WaveReader(filename);
-        format = file->getFormat();
-        delete file;
-    } else {
-        alsaReader = AlsaReader::getInstance(alsaDevice);
-        format = alsaReader->getFormat();
-    }
-
-   return format;
 }
 
 void Transmitter::stop()

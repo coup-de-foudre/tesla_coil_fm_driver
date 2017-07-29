@@ -37,6 +37,7 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include "abstract_reader.h"
 #include "audio_format.h"
 #include "pcm_wave_header.h"
 
@@ -44,17 +45,24 @@ using std::vector;
 using std::string;
 using std::ifstream;
 
-class WaveReader
-{
-    public:
-        WaveReader(string filename);
+class WaveReader : public AbstractReader {
+ public:
+        WaveReader(string filename, unsigned frameSize = 512);
         virtual ~WaveReader();
 
+        bool getFrames(std::vector<float>* &result);
+        void stop(bool block);
         AudioFormat* getFormat();
+
         vector<float>* getFrames(unsigned frameCount, unsigned frameOffset);
+
+        bool isEnd();
         bool isEnd(unsigned frameOffset);
-    private:
+
+ private:
         string filename;
+        unsigned frameSize;
+        unsigned currentOffset;
         PCMWaveHeader header;
         unsigned fileSize, dataOffset;
         ifstream ifs;

@@ -39,8 +39,10 @@
 using std::ostringstream;
 using std::exception;
 
-WaveReader::WaveReader(string filename) :
-    filename(filename)
+WaveReader::WaveReader(string filename, unsigned frameSize) :
+    filename(filename),
+    frameSize(frameSize),
+    currentOffset(0)
 {
     char* headerData;
     vector<char>* data;
@@ -134,6 +136,20 @@ vector<char>* WaveReader::readData(unsigned bytesToRead, bool closeFileOnExcepti
     return data;
 }
 
+
+bool WaveReader::getFrames(std::vector<float>* &result) {
+    std::vector<float>* temp = this->getFrames(frameSize, currentOffset);
+    currentOffset += temp->size();
+
+    if (temp->size() > 0) {
+        result = temp;
+        return true;
+    } else {
+        delete temp;
+        return false;
+    }
+}
+
 vector<float>* WaveReader::getFrames(unsigned frameCount, unsigned frameOffset) {
     unsigned bytesToRead, bytesLeft, bytesPerFrame, offset;
     vector<float>* frames = new vector<float>();
@@ -183,6 +199,11 @@ bool WaveReader::isEnd(unsigned frameOffset)
     return header.subchunk2Size <= frameOffset * (header.bitsPerSample >> 3) * header.channels;
 }
 
+
+bool WaveReader::isEnd() {
+    return this->isEnd(currentOffset);
+}
+
 AudioFormat* WaveReader::getFormat()
 {
     AudioFormat* format = new AudioFormat;
@@ -190,4 +211,10 @@ AudioFormat* WaveReader::getFormat()
     format->sampleRate = header.sampleRate;
     format->bitsPerSample = header.bitsPerSample;
     return format;
+}
+
+
+void WaveReader::stop(bool block) {
+    // Reset offset, but no need to do anything else
+    currentOffset = 0;
 }

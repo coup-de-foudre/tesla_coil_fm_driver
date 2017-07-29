@@ -33,6 +33,8 @@
 
 #include <iostream>
 #include "transmitter.h"
+#include "wave_reader.h"
+#include "alsa_reader.h"
 #include <cstdlib>
 #include <csignal>
 #include <plog/Log.h>
@@ -113,24 +115,26 @@ int main(int argc, char** argv)
     LOG_INFO << "filename    \t" << filename;
 
     signal(SIGINT, sigIntHandler);
+    AbstractReader* reader = NULL;
+    if (filename == "=") {
+        reader = AlsaReader::getInstance(alsaDevice);
+    } else {
+        reader = new WaveReader(filename);
+    }
+    AudioFormat* format = reader->getFormat();
+    LOG_INFO << "Playing: " << ((filename != "-") ? filename : "stdin") << ", "
+             << format->sampleRate << " Hz, "
+             << format->bitsPerSample << " bits, "
+             << ((format->channels > 0x01) ? "stereo" : "mono");
+    delete format;
 
+    transmitter = Transmitter::getInstance(reader);
     try {
-        transmitter = Transmitter::getInstance();
-
-        AudioFormat* format = Transmitter::getFormat(filename, alsaDevice);
-        LOG_INFO << "Playing: " << ((filename != "-") ? filename : "stdin") << ", "
-                 << format->sampleRate << " Hz, "
-                 << format->bitsPerSample << " bits, "
-                 << ((format->channels > 0x01) ? "stereo" : "mono");
-        delete format;
-
-        transmitter->play(filename, alsaDevice, frequencyMHz, spreadMHz, loop);
+        //transmitter->play(filename, alsaDevice, frequencyMHz, spreadMHz, loop);
+        transmitter->transmit();
     } catch (exception &error) {
         LOG_ERROR << "Error: " << error.what();
-        transmitter = Transmitter::getInstance();
-        if (transmitter != NULL) {
-            transmitter->stop();
-        }
+        transmitter->stop();
         return 1;
     }
 
