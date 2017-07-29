@@ -6,5 +6,5 @@ LIBRARIES = -lasound -lm
 
 CFLAGS += -fexceptions -O3 -fpermissive -fno-strict-aliasing -std=c++14 $(INCLUDE) $(LIBRARIES)
 
-latency:
+latency: latency.c
 	$(CPP) $(CFLAGS) -o latency latency.c

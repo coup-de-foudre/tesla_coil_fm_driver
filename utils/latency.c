@@ -557,14 +557,14 @@ int main(int argc, char *argv[])
 	  BW = FILTER_BANDWIDTH;
 	  lfo = 0;
 	  dlfo = 2.*M_PI*FILTERSWEEP_LFO_FREQ/fs;
-	  x[0] = (float*) malloc(channels*sizeof(float));         
-	  x[1] = (float*) malloc(channels*sizeof(float));         
-	  x[2] = (float*) malloc(channels*sizeof(float));         
-	  y[0] = (float*) malloc(channels*sizeof(float));         
-	  y[1] = (float*) malloc(channels*sizeof(float));         
-	  y[2] = (float*) malloc(channels*sizeof(float));         
+	  x[0] = (float*) malloc(channels*sizeof(float));
+	  x[1] = (float*) malloc(channels*sizeof(float));
+	  x[2] = (float*) malloc(channels*sizeof(float));
+	  y[0] = (float*) malloc(channels*sizeof(float));
+	  y[1] = (float*) malloc(channels*sizeof(float));
+	  y[2] = (float*) malloc(channels*sizeof(float));
         }
-                          
+
         while (1) {
 	  frames_in = frames_out = 0;
 	  if (setparams(phandle, chandle, &latency) < 0)
@@ -573,7 +573,7 @@ int main(int argc, char *argv[])
 	  if ((err = snd_pcm_link(chandle, phandle)) < 0) {
 	    printf("Streams link error: %s\n", snd_strerror(err));
 	    exit(0);
-	  }
+      }
 	  if (snd_pcm_format_set_silence(format, buffer, latency*channels) < 0) {
 	    fprintf(stderr, "silence error\n");
 	    break;
@@ -616,8 +616,9 @@ int main(int argc, char *argv[])
 	  }
 	  if (ok)
 	    printf("Success\n");
-	  else
-	    printf("Failure\n");
+	  else {
+	    printf("Failure: %s \n", snd_strerror(r));
+      }
 	  printf("Playback:\n");
 	  showstat(phandle, frames_out);
 	  printf("Capture:\n");
