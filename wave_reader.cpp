@@ -204,6 +204,10 @@ bool WaveReader::isEnd() {
     return this->isEnd(currentOffset);
 }
 
+void WaveReader::reset() {
+    this->stop(true);
+}
+
 AudioFormat* WaveReader::getFormat()
 {
     AudioFormat* format = new AudioFormat;

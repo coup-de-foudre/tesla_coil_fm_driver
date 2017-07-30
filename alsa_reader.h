@@ -47,7 +47,7 @@
 #define STREAM_SAMPLE_RATE 44100
 #define STREAM_BITS_PER_SAMPLE 16
 #define STREAM_CHANNELS 1
-#define ALSA_FRAME_BUFFER_LENGTH 512
+#define ALSA_FRAME_BUFFER_LENGTH 1024
 
 using std::vector;
 
@@ -59,6 +59,7 @@ class AlsaReader : public AbstractReader {
         bool getFrames(vector<float>* &result);
         AudioFormat* getFormat();
         void stop(bool block);
+        void reset();
         static AlsaReader* getInstance(string alsaDevice);
 
  private:

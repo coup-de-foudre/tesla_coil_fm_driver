@@ -60,7 +60,7 @@ void* Transmitter::mmapPeripherals_ = NULL;
 bool Transmitter::isTransmitting_ = false;
 long long unsigned Transmitter::frameOffset_ = 0;
 vector<float>* Transmitter::buffer_ = NULL;
-bool Transmitter::doStop = false;
+volatile bool Transmitter::doStop = false;
 
 std::mutex Transmitter::transmitMutex_;
 
@@ -74,6 +74,10 @@ const unsigned slewTimeMicroseconds_ = 3000000; // 1 second on/off slew
 // Pause between frequency updates to avoid overloading the clock manager
 const unsigned updateDelayMicroseconds_ = 10; // 100 kHz updates
 
+
+/**
+ * Memory-map the peripherals addresses
+ */
 inline void* mmapPeripherals() {
     LOG_DEBUG << "Memory mapping peripherals";
 
@@ -94,27 +98,32 @@ inline void* mmapPeripherals() {
     return peripheralsBase;
 }
 
+
 Transmitter::Transmitter(AbstractReader* reader) {
     LOG_DEBUG << "Initializing transmitter";
     reader_ = reader;
     mmapPeripherals_ = mmapPeripherals();
 }
 
+
 Transmitter::~Transmitter() {
     LOG_DEBUG << "Deleting transmitter";
-    reader_->stop(true);
-    delete reader_;
-    reader_ = NULL;
-
-    if (isTransmitting_ || !doStop) {
-        LOG_DEBUG << "Shutting transmitter down before unmapping peripherals";
+    if (!doStop) {
         this->stop();
     }
+    reader_->stop(true);
     munmap((void*)mmapPeripherals_, PERIPHERALS_LENGTH);
 }
 
-Transmitter* Transmitter::getInstance(AbstractReader* reader)
-{
+
+/**
+ * Get singleton instance of transmitter
+ */
+Transmitter* Transmitter::getInstance(AbstractReader* reader,
+                                      double centerFreqMHz,
+                                      double spreadMHz) {
+    centerFreqMHz_ = centerFreqMHz;
+    spreadMHz_ = spreadMHz;
     static Transmitter instance(reader);
     return &instance;
 }
@@ -300,6 +309,7 @@ void Transmitter::setSpreadMHz(double spreadMHz) {
 /**
  * Play from ALSA device or a file
  */
+/*
 void Transmitter::play(string filename,
                        string alsaDevice,
                        double centerFreqMHz,
@@ -371,50 +381,76 @@ void Transmitter::play(string filename,
     }
     delete format;
 }
+/**/
+
+
+/**
+ * Initialize and run the transmitter in a separate thread
+ */
+void Transmitter::run() {
+    clkInitSoft();
+    do {
+        LOG_DEBUG << "Starting new thransmit thread";
+        std::thread activeThread (Transmitter::transmit);
+        activeThread.join();
+        LOG_DEBUG << "Transmit thread finished. Resetting reader.";
+        reader_->reset();
+    } while (!doStop);
+}
 
 
 /**
  * Transmit all frames from a reader
  */
 void Transmitter::transmit() {
-    unsigned sampleRateMicroseconds = reader_->getFormat()->sampleRate * 1000000;
+
+    // TODO: Set this as a class variable in run()
+    AudioFormat* format = reader_->getFormat();
+    unsigned long sampleRate = format->sampleRate;
+    delete format;
+
     vector<float>* frames = NULL;
 
-    LOG_DEBUG << "Starting transmitter with sample rate " << sampleRateMicroseconds / 1000000 << "Hz";
-
+    LOG_DEBUG << "Starting transmitter with sample rate " << sampleRate << "Hz";
     LOG_DEBUG << "Acquiring transmit lock...";
     transmitMutex_.lock();
+    LOG_DEBUG << "Lock acquired";
 
     unsigned long nFramesProcessed = 0;
     const unsigned long long startMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
-    while (!doStop) {
+    volatile unsigned long long currentMicroseconds = startMicroseconds;
+
+    // TODO: Remove reader_ from this transmitter code a queue in run()
+    // so that this thread does not have any signal processing to do, just
+    // timing
+    while (!doStop && !reader_->isEnd()) {
         if (!reader_->getFrames(frames)) {
             LOG_DEBUG << "Transmit underrun: No frames available";
             continue;
         }
+        // TODO: Signal processing... would be best in another thread
 
-        // TODO: Signal processing here
-
+        LOG_DEBUG << "Got frames of size " << frames->size();
         for (unsigned ii = 0; ii < frames->size(); ii++) {
-            unsigned long long nextFrameTrigger = nFramesProcessed * sampleRateMicroseconds;
 
+            unsigned long nextFrameTrigger = (nFramesProcessed * 1000000) / sampleRate;
             // Spin-wait
-            while (ACCESS64(mmapPeripherals_, ST_CLO) - startMicroseconds <= nextFrameTrigger) {
+            while (!doStop && currentMicroseconds - startMicroseconds < nextFrameTrigger) {
                 asm("nop");
+                currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
             }
+            if (doStop) break;
             setTransmitValue((*frames)[ii]);
             nFramesProcessed++;
-
-            if (doStop) break;
         }
 
         delete frames;
         frames = NULL;
     }
+
     transmitMutex_.unlock();
     LOG_DEBUG << "Total frames transmitted: " << nFramesProcessed;
 }
-
 
 void* Transmitter::transmitThread(unsigned sampleRate)
 {

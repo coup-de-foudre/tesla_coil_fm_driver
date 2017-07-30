@@ -22,6 +22,11 @@ class AbstractReader {
   virtual void stop(bool block) = 0;
 
   /**
+   * Reset the reader
+   */
+  virtual void reset() = 0;
+
+  /**
    * Get the format of the input
    */
   virtual AudioFormat* getFormat() = 0;

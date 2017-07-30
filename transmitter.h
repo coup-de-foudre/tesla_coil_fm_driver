@@ -56,13 +56,14 @@ class Transmitter {
     void play(string filename, string alsaDevice, double frequencyMHz, double spreadMHz, bool loop);
     void stop();
 
-    static Transmitter* getInstance(AbstractReader* reader);
+    static Transmitter* getInstance(AbstractReader* reader, double centerFreqMHz, double spreadMHz);
     static AudioFormat* getFormat(string filename, string alsaDevice);
+    static void run();
 
-    static void transmit();
 private:
     Transmitter(AbstractReader* reader);
 
+    static void transmit();
     static AbstractReader* reader_;
     static void setTransmitValue(double value);
     static void* transmitThread(unsigned sampleRate);
@@ -92,7 +93,7 @@ private:
     static vector<float>* buffer_;
     static unsigned long long frameOffset_;
     static bool isTransmitting_;
-    static bool doStop;
+    volatile static bool doStop;
 
 };
 

@@ -105,7 +105,9 @@ int main(int argc, char** argv)
 
 
     if (showUsage) {
-        cout << "Usage: " << argv[0] << " [-f frequencyMHz=100.0] [-s spreadMHz=0.078] [-v] [-r] [-d alsa-device] FILE" << endl;
+        cout << "Usage: " << argv[0]
+             << " [-f frequencyMHz=100.0] [-s spreadMHz=0.078]"
+             << " [-v] [-r] [-d alsa-device] FILE" << endl;
         return 0;
     }
 
@@ -115,8 +117,9 @@ int main(int argc, char** argv)
     LOG_INFO << "filename    \t" << filename;
 
     signal(SIGINT, sigIntHandler);
+
     AbstractReader* reader = NULL;
-    if (filename == "=") {
+    if (filename == "-") {
         reader = AlsaReader::getInstance(alsaDevice);
     } else {
         reader = new WaveReader(filename);
@@ -128,10 +131,10 @@ int main(int argc, char** argv)
              << ((format->channels > 0x01) ? "stereo" : "mono");
     delete format;
 
-    transmitter = Transmitter::getInstance(reader);
+    transmitter = Transmitter::getInstance(reader, frequencyMHz, spreadMHz);
     try {
         //transmitter->play(filename, alsaDevice, frequencyMHz, spreadMHz, loop);
-        transmitter->transmit();
+        transmitter->run();
     } catch (exception &error) {
         LOG_ERROR << "Error: " << error.what();
         transmitter->stop();

@@ -58,6 +58,7 @@ class WaveReader : public AbstractReader {
 
         bool isEnd();
         bool isEnd(unsigned frameOffset);
+        void reset();
 
  private:
         string filename;

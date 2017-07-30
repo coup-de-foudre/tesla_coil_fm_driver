@@ -170,7 +170,7 @@ void* AlsaReader::read(void* params) {
                 delete element;
             });
         if (numConsumed > 0) {
-            LOG_DEBUG << "Buffer drain conusmed " << numConsumed << " frames";
+            //LOG_DEBUG << "Buffer drain conusmed " << numConsumed << " frames";
         }
         if( !queue.push(values) ) {
             LOG_WARNING << "Unable to add frames to queue? Giving up.";
@@ -181,12 +181,21 @@ void* AlsaReader::read(void* params) {
     return NULL;
 }
 
-void AlsaReader::stop(bool block = false) {
+void AlsaReader::stop(bool block) {
     doStop = true;
     if (block) {
         pthread_join(thread, NULL);
     }
 }
+
+
+/**
+ * Alsa readers cannot be reset
+ */
+void AlsaReader::reset() {
+    AlsaReader::getInstance(alsaDevice_)->stop(true);
+}
+
 
 /**
  * Non-blocking thread-safe read for getting a frame from the buffer
