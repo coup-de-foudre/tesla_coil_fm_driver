@@ -443,7 +443,7 @@ void Transmitter::transmit() {
             setTransmitValue((*frames)[ii]);
             nFramesProcessed++;
         }
-
+        LOG_DEBUG << "processed: " << nFramesProcessed << ". nextTrigger: " << nextFrameTrigger;
         delete frames;
         frames = NULL;
     }
