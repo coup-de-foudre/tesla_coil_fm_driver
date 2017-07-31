@@ -1,12 +1,13 @@
 [Unit]
 Description=CDF FM Transmitter
- 
+
 [Service]
-ExecStart=/home/pi/FM_transmitter/fm_transmitter -f 89.1 -s 0.078 /home/pi/FM_transmitter/star_wars.wav 
+ExecStart=/home/pi/FM_transmitter/fm_transmitter -f 89.1 -s 0.078 /home/pi/FM_transmitter/star_wars.wav
 Restart=always
 RestartSec=3
 KillSignal=SIGINT
- 
+TimeoutStopSec=10
+
 [Install]
 WantedBy=multi-user.target
 Alias=fm_transmitter.service
