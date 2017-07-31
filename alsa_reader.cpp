@@ -119,7 +119,7 @@ void *AlsaReader::readStdin(void *params)
         exit (1);
     }
 
-    if ((err = snd_pcm_hw_params_set_channels (capture_handle, hw_params, 1)) < 0) {
+    if ((err = snd_pcm_hw_params_set_channels (capture_handle, hw_params, 2)) < 0) {
         fprintf (stderr, "cannot set channel count (%s)\n",
              snd_strerror (err));
         exit (1);
@@ -154,7 +154,7 @@ void *AlsaReader::readStdin(void *params)
         unsigned streamSize = (unsigned int) stream.size();
         if (streamSize < MAX_STREAM_SIZE) {
 		    int _len = (streamSize + 1024 > MAX_STREAM_SIZE) ? MAX_STREAM_SIZE - streamSize : 1024;
-    		int bytes = snd_pcm_readi(capture_handle, readBuffer, _len / 2) * 2; // /2 and *2 because snd_pcm_readi works in units of 16bit frames
+    		int bytes = snd_pcm_readi(capture_handle, readBuffer, _len / 4) * 4; // /2 and *2 because snd_pcm_readi works in units of 16bit frames
 
             if (bytes > 0) {
                 stream.insert(stream.end(), readBuffer, readBuffer + bytes);
