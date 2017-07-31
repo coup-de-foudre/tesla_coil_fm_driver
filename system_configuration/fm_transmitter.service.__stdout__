@@ -5,7 +5,8 @@ Description=CDF FM Transmitter
 ExecStart=/home/pi/FM_transmitter/fm_transmitter -f 89.1 -s 0.078 - 
 Restart=always
 RestartSec=3
- 
+KillSignal=SIGINT
+
 [Install]
 WantedBy=multi-user.target
 Alias=fm_transmitter.service
