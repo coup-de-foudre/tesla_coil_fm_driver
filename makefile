@@ -28,6 +28,28 @@ transmitter.o: transmitter.cpp transmitter.h peripherals.h
 main.o: main.cpp
 	$(CPP) $(CFLAGS) $(INCLUDE) -c main.cpp
 
+.PHONY: install
+install: fm_transmitter
+	sudo cp fm_transmitter /usr/local/bin
+
+.PHONY: daemon
+daemon: install
+	sudo cp ./system_configuration/fm_transmitter.service.__alsa__ /lib/systemd/system/fm_transmitter.service
+	sudo systemctl daemon-reload
+	sudo systemctl enable fm_transmitter
+	sudo systemctl start fm_transmitter
+
+.PHONY: uninstall-daemon
+uninstall-daemon:
+	sudo systemctl disable fm_transmitter  || echo "No need to disable fm_transmitter"
+	sudo systemctl stop fm_transmitter || echo "fm_transmitter service not running"
+	sudo rm -f /lib/systemd/system/fm_transmitter.service
+	sudo systemctl daemon-reload
+
+.PHONY: uninstall
+uninstall: uninstall-daemon
+	sudo rm -f /usr/local/bin/fm_transmitter
+
 .PHONY: packages $(PACKAGES)
 packages: $(PACKAGES)
 
