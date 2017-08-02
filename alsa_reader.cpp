@@ -150,7 +150,6 @@ void* AlsaReader::read(void* params) {
 
     while (!doStop) {
         int numFrames = snd_pcm_readi(capture_handle, readBuffer, bufferLength);
-
         if (numFrames < 0) {
             LOG_ERROR << "Error reading from ALSA device: " << snd_strerror(numFrames);
             doStop = 1;
@@ -164,16 +163,16 @@ void* AlsaReader::read(void* params) {
         std::vector<float>* values = new std::vector<float>(readBuffer, readBuffer + bufferLength);
 
         // Drain buffer
-        std::atomic<int> numConsumed(0);
+        int numConsumed = 0;
         queue.consume_all([&numConsumed] (vector<float>* element) -> void {
                 numConsumed += element->size();
                 delete element;
             });
         if (numConsumed > 0) {
-            //LOG_DEBUG << "Buffer drain conusmed " << numConsumed << " frames";
+            LOG_DEBUG << "Buffer drain conusmed " << numConsumed << " frames";
         }
         if( !queue.push(values) ) {
-            LOG_WARNING << "Unable to add frames to queue? Giving up.";
+            LOG_WARNING << "Unable to add frames to queue?";
         }
     }
 

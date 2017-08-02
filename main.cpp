@@ -49,7 +49,6 @@ void sigIntHandler(int sigNum)
 {
     if (transmitter != NULL) {
         LOG_INFO << "Stopping...";
-        // TODO: Soft stop
         transmitter->stop();
     }
 }
@@ -101,8 +100,6 @@ int main(int argc, char** argv)
     } else {
         plog::init(plog::info, &consoleAppender);
     }
-    //plog::init(plog::debug, "log.txt");
-
 
     if (showUsage) {
         cout << "Usage: " << argv[0]
@@ -133,13 +130,12 @@ int main(int argc, char** argv)
 
     transmitter = Transmitter::getInstance(reader, frequencyMHz, spreadMHz);
     try {
-        //transmitter->play(filename, alsaDevice, frequencyMHz, spreadMHz, loop);
-        transmitter->run();
+        transmitter->run(loop);
+        transmitter->stop();
     } catch (exception &error) {
         LOG_ERROR << "Error: " << error.what();
         transmitter->stop();
         return 1;
     }
-
     return 0;
 }

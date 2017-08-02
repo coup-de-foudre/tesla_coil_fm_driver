@@ -40,6 +40,7 @@
 #include <vector>
 #include <thread>
 #include <mutex>
+#include <boost/lockfree/spsc_queue.hpp>
 
 #define BUFFER_FRAMES 2048
 
@@ -53,47 +54,43 @@ class Transmitter {
  public:
     virtual ~Transmitter();
 
-    void play(string filename, string alsaDevice, double frequencyMHz, double spreadMHz, bool loop);
+    void play(string filename, string alsaDevice, float frequencyMHz, float spreadMHz, bool loop);
     void stop();
 
-    static Transmitter* getInstance(AbstractReader* reader, double centerFreqMHz, double spreadMHz);
+    static Transmitter* getInstance(AbstractReader* reader, float centerFreqMHz, float spreadMHz);
     static AudioFormat* getFormat(string filename, string alsaDevice);
-    static void run();
+    static void run(bool loop);
 
 private:
     Transmitter(AbstractReader* reader);
 
     static void transmit();
-    static AbstractReader* reader_;
-    static void setTransmitValue(double value);
-    static void* transmitThread(unsigned sampleRate);
+    static void setTransmitValue(float value);
 
-    static unsigned clkSlew(double finalFreqMHz,
-                            double startFreqMHz,
-                            double slewTimeMicroseconds);
+    static unsigned clkSlew(float finalFreqMHz,
+                            float startFreqMHz,
+                            float slewTimeMicroseconds);
     static unsigned clkShutdownHard(bool lock);
-    static unsigned clkShutdownSoft();
-
-    static unsigned clkInitHard(double freqMHz, bool lock);
+    static void  clkShutdownSoft();
+    static unsigned clkInitHard(float freqMHz, bool lock);
     static unsigned clkInitSoft();
 
-    static unsigned clkDivisorSet(double targetFreqMHz);
-    void setCenterFreqMHz(double centerFreqMHz);
-    void setSpreadMHz(double spreadMHz);
-    void initClock();
+    static unsigned clkDivisorSet(float targetFreqMHz);
+    void setCenterFreqMHz(float centerFreqMHz);
+    void setSpreadMHz(float spreadMHz);
+    static void garbageCollector(boost::lockfree::spsc_queue<std::vector<float>*> *garbage);
 
-    static double centerFreqMHz_;
-    static double spreadMHz_;
-    static double currentValue_;
+    static AbstractReader* reader_;
+    static float centerFreqMHz_;
+    static float spreadMHz_;
+    static float currentValue_;
     static void* mmapPeripherals_;
     static unsigned clockOffsetAddr_;
-
+    volatile static bool doStop_;
     static std::mutex transmitMutex_;
 
-    static vector<float>* buffer_;
-    static unsigned long long frameOffset_;
-    static bool isTransmitting_;
-    volatile static bool doStop;
+
+    static boost::lockfree::spsc_queue<std::vector<float>*> garbage;
 
 };
 

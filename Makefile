@@ -65,4 +65,4 @@ $(PACKAGES):
 	[ -z "`! dpkg -l | grep $@ -c >>/dev/null`" ] && sudo apt-get install -y $@
 
 clean:
-	rm *.o
+	rm -f *.o
