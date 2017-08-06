@@ -2,7 +2,7 @@
 Description=CDF FM Transmitter
 
 [Service]
-ExecStart=/usr/local/bin/fm_transmitter -f 100.1 -s 0.078 -
+ExecStart=/usr/local/bin/fm_transmitter -D 30 -f 100.1 -s 0.078 -
 Restart=always
 RestartSec=3
 KillSignal=SIGINT
