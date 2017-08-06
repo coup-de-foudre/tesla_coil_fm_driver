@@ -318,13 +318,14 @@ void Transmitter::run(bool loop) {
     std::thread garbageThread(Transmitter::garbageCollector, &garbage);
     do {
         LOG_DEBUG << "Starting new thransmit thread";
-
         sched_param sch_params;
         sch_params.sched_priority = 99;
         std::thread thread (Transmitter::transmit);
+#if 0
         if(pthread_setschedparam(thread.native_handle(), SCHED_RR, &sch_params)) {
             LOG_ERROR << "Failed to set Thread scheduling : " << std::strerror(errno);
         }
+#endif
         thread.join();
         LOG_DEBUG << "Transmit thread finished. Resetting reader.";
         reader_->reset();
