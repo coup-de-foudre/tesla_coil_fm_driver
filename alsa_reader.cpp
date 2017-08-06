@@ -118,7 +118,7 @@ int AlsaReader::setParams(snd_pcm_t* &capture_handle) {
         return -EINVAL;
     }
 
-    if ((err = snd_pcm_hw_params_set_channels (capture_handle, hw_params, 1)) < 0) {
+    if ((err = snd_pcm_hw_params_set_channels (capture_handle, hw_params, STREAM_CHANNELS)) < 0) {
         LOG_ERROR << "cannot set channel count: " << snd_strerror (err);
         return err;
     }
@@ -140,8 +140,11 @@ int AlsaReader::setParams(snd_pcm_t* &capture_handle) {
 
 void* AlsaReader::read(void* params) {
     snd_pcm_t *capture_handle;
-    unsigned bufferLength = ALSA_FRAME_BUFFER_LENGTH;
+    unsigned bufferLength = ALSA_FRAME_BUFFER_LENGTH * STREAM_CHANNELS;;
     float* readBuffer = new float[bufferLength];
+#if STREAM_CHANNELS == 2
+    float* readBuffer2 = new float[bufferLength / 2];
+#endif
 
     if (setParams(capture_handle)) {
         LOG_ERROR << "Unable to set ALSA parameters. Exiting.";
@@ -149,18 +152,25 @@ void* AlsaReader::read(void* params) {
     }
 
     while (!doStop) {
-        int numFrames = snd_pcm_readi(capture_handle, readBuffer, bufferLength);
+        int numFrames = snd_pcm_readi(capture_handle, readBuffer, bufferLength / STREAM_CHANNELS);
         if (numFrames < 0) {
             LOG_ERROR << "Error reading from ALSA device: " << snd_strerror(numFrames);
             doStop = 1;
             break;
-        } else if ((unsigned)numFrames != bufferLength) {
+        } else if ((unsigned)numFrames != (bufferLength / STREAM_CHANNELS)) {
             LOG_ERROR << "Asked for " << bufferLength << " frames, got " << numFrames;
             doStop = 1;
             break;
         }
 
+#if STREAM_CHANNELS == 2
+	for (unsigned i = 0; i < bufferLength / 2; ++i) {
+		readBuffer2[i] = readBuffer[i * 2];
+	}
+        std::vector<float>* values = new std::vector<float>(readBuffer2, readBuffer2 + (bufferLength / 2));
+#else
         std::vector<float>* values = new std::vector<float>(readBuffer, readBuffer + bufferLength);
+#endif
 
         // Drain buffer
         int numConsumed = 0;
