@@ -166,6 +166,7 @@ curl -kL https://raw.github.com/pypa/pip/master/contrib/get-pip.py | sudo python
        
 sudo pip install pygments==1.6
 
+
 echo "$0 done."
 ```
 
@@ -196,3 +197,8 @@ mobile shell `mosh` than ssh.
 ```
 dwc_otg.lpm_enable=0 console=serial0,115200 console=tty1 root=PARTUUID=a8790229-02 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait quiet init=/usr/lib/raspi-config/init_resize.sh
 ```
+
+
+### SETUP GUIDE
+
+https://kr15h.github.io/RPi-Setup/
