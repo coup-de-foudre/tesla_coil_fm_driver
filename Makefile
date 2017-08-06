@@ -43,6 +43,10 @@ daemon: install
 	sudo systemctl enable fm_transmitter
 	sudo systemctl start fm_transmitter
 
+.PHONY: optimize
+optimize: 
+	sudo system_configuration/optimize_services.sh
+
 .PHONY: uninstall-daemon
 uninstall-daemon:
 	sudo systemctl disable fm_transmitter  || echo "No need to disable fm_transmitter"
