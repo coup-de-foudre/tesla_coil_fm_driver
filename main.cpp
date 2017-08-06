@@ -63,6 +63,7 @@ int main(int argc, char** argv)
     bool debugLog = false;
     bool showUsage = true;
     string alsaDevice = "plughw:1,0";
+    int startDelay = 0;
 
     for (int i = 1; i < argc; i++) {
         if (string("-f") == argv[i]) {
@@ -84,6 +85,9 @@ int main(int argc, char** argv)
                 alsaDevice = argv[i+1];
                 i++;
             }
+        } else if (string("-D") == argv[i]) {
+            startDelay = atoi(argv[i+1]);
+            i++;
         } else {
             if (i == argc - 1) {
                 showUsage = false;
@@ -104,7 +108,7 @@ int main(int argc, char** argv)
     if (showUsage) {
         cout << "Usage: " << argv[0]
              << " [-f frequencyMHz=100.0] [-s spreadMHz=0.078]"
-             << " [-v] [-r] [-d alsa-device] FILE" << endl;
+             << " [-v] [-r] [-d alsa-device] [-D seconds] FILE" << endl;
         return 0;
     }
 
@@ -112,6 +116,9 @@ int main(int argc, char** argv)
     LOG_INFO << "frequencyMHz\t" << frequencyMHz;
     LOG_INFO << "spreadMHz   \t" << spreadMHz;
     LOG_INFO << "filename    \t" << filename;
+    LOG_INFO << "startDelay  \t" << startDelay;
+
+    sleep(startDelay);
 
     signal(SIGINT, sigIntHandler);
 
