@@ -16,6 +16,7 @@ echo "${AUTHORIZED_KEYS}" >> ${HOME_DIR}/.ssh/authorized_keys
 
 # TODO: Change password?
 
+
 # Update apt and install minimum requirements for this script
 sudo apt-get update && sudo apt-get install -y \
    git \
@@ -33,4 +34,7 @@ else
 fi
 
 cd ${CODE_DIR}
-make packages && make
+make packages && make && make daemon
+
+
+# This installs development utils

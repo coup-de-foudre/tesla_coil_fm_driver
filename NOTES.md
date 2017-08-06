@@ -193,3 +193,6 @@ mobile shell `mosh` than ssh.
   1. [Genreal instructions](https://mosh.org/#getting)
    
 
+```
+dwc_otg.lpm_enable=0 console=serial0,115200 console=tty1 root=PARTUUID=a8790229-02 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait quiet init=/usr/lib/raspi-config/init_resize.sh
+```

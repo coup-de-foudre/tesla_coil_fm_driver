@@ -19,6 +19,8 @@ fi
 DISK=${1}
 IP_ADDRESS=${2}
 
+FILE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+TEMPLATE_DIR=${FILE_DIR}
 
 GATEWAY_ADDRESS="192.168.2.1"
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -36,11 +38,13 @@ fi
 sudo touch ${SD_VOLUME}/ssh
 
 # Configure a static IP
-export IP_ADDRESS
-export GATEWAY_ADDRESS
-perl -p -e 's/\$\{([^}]+)\}/defined $ENV{$1} ? $ENV{$1} : $&/eg' \
-  < cmdline.txt.template \
-  > ${SD_VOLUME}/cmdline.txt
+CMDLINE_APPEND="ip=${IP_ADDRESS}::${GATEWAY_ADDRESS}:255.255.255.0:rpi:eth0:off"
+CMDLINE_FILE=${SD_VOLUME}/cmdline.txt
 
-# Eject the disk
-sudo diskutil eject ${DISK}
+if grep -q "ip="  "${CMDLINE_FILE}"; then
+    echo "IP address already configured in ${CMDLINE_FILE}"
+    exit -1;
+else
+    CMDLINE="$(cat ${CMDLINE_FILE} | tr -d '\n')"
+    echo "${CMDLINE} ${CMDLINE_APPEND}" > ${CMDLINE_FILE}
+fi
