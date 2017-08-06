@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
 
 USAGE="USAGE: ${0} <sd-disk> <ip-address>"
-HELP="An SD card to do the things we want
+
+HELP="Configure SD card set up with SSH and a static IP
 
 sd-disk     :    A disk with the RPi boot image loaded onto it.
-ip-address  :    The static IP address to assign to this Pi.
+ip-address  :    The static IP address to assign to this Pi, e.g., 192.168.2.240
+
 "
 
 echo "${USAGE}"
 echo "${HELP}"
 
-DISK=${1}
 if [ "$#" -ne 2 ]; then
-    IP_ADDRESS="192.168.2.240"
-    echo "WARNING: setting defualt ip address ${IP_ADDRESS}"
-else
-    IP_ADDRESS=${2}
-fi 
+    echo "ERROR: Missing arguments"
+    exit -1
+fi
+DISK=${1}
+IP_ADDRESS=${2}
+
 
 GATEWAY_ADDRESS="192.168.2.1"
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
