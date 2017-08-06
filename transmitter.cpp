@@ -320,9 +320,9 @@ void Transmitter::run(bool loop) {
         LOG_DEBUG << "Starting new thransmit thread";
 
         sched_param sch_params;
-        sch_params.sched_priority = 1;
+        sch_params.sched_priority = 99;
         std::thread thread (Transmitter::transmit);
-        if(pthread_setschedparam(thread.native_handle(), SCHED_FIFO, &sch_params)) {
+        if(pthread_setschedparam(thread.native_handle(), SCHED_RR, &sch_params)) {
             LOG_ERROR << "Failed to set Thread scheduling : " << std::strerror(errno);
         }
         thread.join();
