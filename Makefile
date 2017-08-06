@@ -33,12 +33,13 @@ main.o: main.cpp
 	$(CPP) $(CFLAGS) -c main.cpp
 
 .PHONY: install
-	install: fm_transmitter
-	sudo cp fm_transmitter /usr/local/bin
+install: fm_transmitter
+	sudo cp fm_transmitter /usr/local/bin/fm_transmitter && sync
 
 .PHONY: daemon
 daemon: install
 	sudo cp ./system_configuration/fm_transmitter.service.__alsa__ /lib/systemd/system/fm_transmitter.service
+	sync
 	sudo systemctl daemon-reload
 	sudo systemctl enable fm_transmitter
 	sudo systemctl start fm_transmitter
