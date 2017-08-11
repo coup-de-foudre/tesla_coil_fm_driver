@@ -31,22 +31,18 @@
     WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#include <sstream>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <thread>
+#include <pthread.h>
+#include <plog/Log.h>
+
 #include "transmitter.h"
 #include "wave_reader.h"
 #include "alsa_reader.h"
 #include "peripherals.h"
-#include <sstream>
-#include <unistd.h>
-#include <sys/mman.h>
-#include <plog/Log.h>
-#include <thread>
-#include <pthread.h>
-
-#include <iostream>
-
-using std::ostringstream;
-
-#define STDIN_READ_DELAY 700000
+#include "noisegate.h"
 
 #define HEX_STREAM(X) "0x" << std::setfill('0') << std::setw(8) << std::hex << X
 
@@ -62,6 +58,7 @@ std::mutex Transmitter::transmitMutex_;
 
 unsigned Transmitter::clockOffsetAddr_ = CM_GP0CTL;
 AbstractReader* Transmitter::reader_ = NULL;
+
 
 // Garbage from transmitter
 boost::lockfree::spsc_queue<std::vector<float>*> Transmitter::garbage(256);
@@ -188,6 +185,8 @@ unsigned Transmitter::clkShutdownHard(bool lock=true) {
         usleep(1);
     }
 
+    // Reset clock divisor to 1
+    ACCESS(mmapPeripherals_, CM_GP0DIV) = CM_PASSWD | 0x00000001;
     transmitMutex_.unlock();
     return cmCtlInitialState;
 }
@@ -224,6 +223,7 @@ unsigned Transmitter::clkInitHard(float freqMHz, bool lock=true) {
     }
     return clkDivisor;
 }
+
 
 /**
  * Soft shutdown of the clock
@@ -276,7 +276,6 @@ inline unsigned Transmitter::clkDivisorSet(float targetFreqMHz) {
     } else {
         clockDivisor = (unsigned) (divisor * 4096.0 + 0.5);
     }
-
     ACCESS(mmapPeripherals_, CM_GP0DIV) = CM_PASSWD | (0x00FFFFFF & clockDivisor);
     return clockDivisor;
 }
@@ -318,10 +317,10 @@ void Transmitter::run(bool loop) {
     std::thread garbageThread(Transmitter::garbageCollector, &garbage);
     do {
         LOG_DEBUG << "Starting new thransmit thread";
-        sched_param sch_params;
-        sch_params.sched_priority = 99;
         std::thread thread (Transmitter::transmit);
 #if 0
+	sched_param sch_params;
+        sch_params.sched_priority = 99;
         if(pthread_setschedparam(thread.native_handle(), SCHED_RR, &sch_params)) {
             LOG_ERROR << "Failed to set Thread scheduling : " << std::strerror(errno);
         }
@@ -367,6 +366,12 @@ void Transmitter::transmit() {
 
     vector<float>* frames = NULL;
 
+    float attackSeconds = 0.005;
+    float decaySeconds = 1.5;
+    float triggerDb = -16.0;
+    float gateEffectScale = -5.0;
+    noisegate::NoiseGate noiseGate(sampleRate, attackSeconds, decaySeconds, triggerDb);
+
     LOG_DEBUG << "Starting transmitter with sample rate " << sampleRate << "Hz";
     LOG_DEBUG << "Acquiring transmit lock...";
     transmitMutex_.lock();
@@ -375,13 +380,17 @@ void Transmitter::transmit() {
     // TODO: Remove reader_ from this transmitter code a queue in run()
     // so that this thread does not have any signal processing to do, just
     // timing
+    vector<float> gateLevelFrames(1024);
+    
     while (!doStop_ && !reader_->isEnd()) {
         // Spin-wait
         if (!reader_->getFrames(frames)) {
             continue;
         }
 
-        // TODO: Signal processing... would be best in another thread?
+        // Signal processing... would be best in another thread?
+	noiseGate.apply(*frames, gateLevelFrames);
+	
         volatile unsigned long long frameStartMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
         unsigned bufferSize = frames->size();
         for (float ii = 0; ii < bufferSize; ii++) {
@@ -396,7 +405,7 @@ void Transmitter::transmit() {
                     ((currentMicroseconds - frameStartMicroseconds) < nextFrameTrigger));
 
             if (doStop_) break;
-            setTransmitValue((*frames)[ii]);
+            setTransmitValue((*frames)[ii] +  gateLevelFrames[ii] * gateEffectScale);
         }
         // Push frames to garbage queue for deletion elsewhere
         garbage.push(frames);

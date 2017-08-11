@@ -25,7 +25,7 @@ namespace noisegate {
       state_(0.0) {
       float halfLifeSamples = halfLifeSeconds * sampleRateHz;
       float decayConstant = std::log(2) / halfLifeSamples;
-      scaleFactor_ = std::exp(-decayConstant_);
+      scaleFactor_ = std::exp(-decayConstant);
     }
 
     /**
@@ -33,7 +33,7 @@ namespace noisegate {
      */ 
     float apply(float input) {
       float result = scaleFactor_ * state_ + (1.0 - scaleFactor_) * (input * input); 
-      state = result;
+      state_ = result;
       return std::sqrt(result);
     }
 
@@ -59,7 +59,7 @@ namespace noisegate {
 	      float attackSeconds,
 	      float decaySeconds,
 	      float triggerDb):
-      powerEstimator_(sampleRateHz_, std::min(attackSeconds, decaySeconds)) {
+      powerEstimator_(sampleRateHz, std::min(attackSeconds, decaySeconds)) {
       
       triggerLevel_ = std::pow(10.0, triggerDb / 20.0);
       lastOutput_ = 0.0;
@@ -82,9 +82,10 @@ namespace noisegate {
 	       std::vector<float> &gateLevelBuffer) {
       gateLevelBuffer.resize(inputBuffer.size());
 
-      for (int i = 0; i < inputBuffer.size(), i++) {
+      for (unsigned i = 0; i < inputBuffer.size(); i++) {
+
 	float powerLevel = powerEstimator_.apply(inputBuffer[i]);
-	bool gateIsOff = powerLevel > triggerLevel;
+	bool gateIsOff = powerLevel > triggerLevel_;
 	float nextOutput;
 
 	if (gateIsOff) {
