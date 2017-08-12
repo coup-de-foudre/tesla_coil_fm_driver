@@ -162,6 +162,8 @@ unsigned Transmitter::clkSlew(float finalFreqMHz,
 /**
  * Hard shutdown of the clock
  *
+ * Does not turn on the clock if it is off.
+ *
  * Returns the clock manager state prior to shutdown
  */
 unsigned Transmitter::clkShutdownHard(bool lock=true) {
@@ -234,15 +236,18 @@ void Transmitter::clkShutdownSoft() {
     LOG_DEBUG << "Soft shutdown of clock";
     LOG_DEBUG << "Acquiring lock...";
     transmitMutex_.lock();
+
     volatile bool enabled =
         ACCESS(mmapPeripherals_, clockOffsetAddr_) & (0x01 << 4);
 
+    float currentFrequencyMHz = getCurrentTransmitFrequencyMHz();
+    LOG_DEBUG << "Freq prior to shutdown: currentFrequencyMHz=" << currentFrequencyMHz;
     if (enabled) {
-        clkSlew(centerFreqMHz_ + softOffDifferenceMHz_, centerFreqMHz_, slewTimeMicroseconds_);
-        clkShutdownHard(false);
+        clkSlew(centerFreqMHz_ + softOffDifferenceMHz_, currentFrequencyMHz, slewTimeMicroseconds_);
     } else {
-        LOG_DEBUG << "Clock is not enabled. Not shutitng down.";
+        LOG_DEBUG << "Clock is not enabled. No slew necessary.";
     }
+    clkShutdownHard(false);
     transmitMutex_.unlock();
 }
 
@@ -280,6 +285,15 @@ inline unsigned Transmitter::clkDivisorSet(float targetFreqMHz) {
     return clockDivisor;
 }
 
+
+/**
+ * Read the current transmission frequency from the peripheral bus
+ */
+inline float Transmitter::getCurrentTransmitFrequencyMHz() {
+  volatile unsigned clockDivisor = 0x00FFFFFF & ACCESS(mmapPeripherals_, CM_GP0DIV);
+  float divisor = ((float) clockDivisor) / 4096.0;
+  return PLLD_FREQ_MHZ / divisor;
+}
 
 /**
  * Set the transmit frequency offset from the current spreadFreqMHz and centerFreqMHz
@@ -365,13 +379,14 @@ void Transmitter::transmit() {
     delete format;
 
     vector<float>* frames = NULL;
-
+    
     float attackSeconds = 0.005;
-    float decaySeconds = 1.5;
-    float triggerDb = -16.0;
-    float gateEffectScale = -5.0;
+    float decaySeconds = 0.5;
+    float triggerDb = -20.0;
+    float gateEffectScale = 1.0;
     noisegate::NoiseGate noiseGate(sampleRate, attackSeconds, decaySeconds, triggerDb);
 
+    
     LOG_DEBUG << "Starting transmitter with sample rate " << sampleRate << "Hz";
     LOG_DEBUG << "Acquiring transmit lock...";
     transmitMutex_.lock();

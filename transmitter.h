@@ -77,6 +77,8 @@ private:
   static unsigned clkInitSoft();
 
   static unsigned clkDivisorSet(float targetFreqMHz);
+
+  static float getCurrentTransmitFrequencyMHz();
   void setCenterFreqMHz(float centerFreqMHz);
   void setSpreadMHz(float spreadMHz);
   static void garbageCollector(boost::lockfree::spsc_queue<std::vector<float>*> *garbage);

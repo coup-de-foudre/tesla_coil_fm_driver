@@ -202,3 +202,18 @@ dwc_otg.lpm_enable=0 console=serial0,115200 console=tty1 root=PARTUUID=a8790229-
 ### SETUP GUIDE
 
 https://kr15h.github.io/RPi-Setup/
+
+
+### TODOs:
+
+  - [x] Make `clkShutdownSoft` start from the current output value
+  - [ ] Add pulsing 
+  - [ ] Tune current parameters with coil
+
+  - [ ] Add NoiseGate configuration parameters to the command line or ini file
+      - [ ] If INI file, update the makefile to move configuration to the
+            correct location
+  - [ ] Make a deploy script for the PIs. Either
+      - [ ] Push to remotes and have them run a hook to reinstall (ideal); or
+      - [ ] Run a `.sh` script on them that pulls from a remote 
+
