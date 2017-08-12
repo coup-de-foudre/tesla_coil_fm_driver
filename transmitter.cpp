@@ -384,7 +384,12 @@ void Transmitter::transmit() {
   float gateEffectScale = 1.0;
   noisegate::NoiseGate noiseGate(sampleRate, attackSeconds, decaySeconds, triggerDb);
 
-
+  /* TODO
+  float pulseHalfLife = 0.2;
+  float pulseEffectScale = 1.0;
+  noisegate::PowerEstimator pulse(sampleRate, pulseHalfLife);
+  */
+  
   LOG_DEBUG << "Starting transmitter with sample rate " << sampleRate << "Hz";
   LOG_DEBUG << "Acquiring transmit lock...";
   transmitMutex_.lock();
@@ -394,7 +399,6 @@ void Transmitter::transmit() {
   // so that this thread does not have any signal processing to do, just
   // timing
   vector<float> gateLevelFrames(1024);
-    
   while (!doStop_ && !reader_->isEnd()) {
     // Spin-wait
     if (!reader_->getFrames(frames)) {
@@ -418,7 +422,9 @@ void Transmitter::transmit() {
 	      ((currentMicroseconds - frameStartMicroseconds) < nextFrameTrigger));
 
       if (doStop_) break;
-      setTransmitValue((*frames)[ii] +  gateLevelFrames[ii] * gateEffectScale);
+
+      float nextOutputValue = (*frames)[ii] + gateEffectScale * gateLevelFrames[ii];
+      setTransmitValue(nextOutputValue);
     }
     // Push frames to garbage queue for deletion elsewhere
     garbage.push(frames);
