@@ -380,8 +380,8 @@ void Transmitter::transmit() {
 
   float attackSeconds = 0.005;
   float decaySeconds = 0.5;
-  float triggerDb = -20.0;
-  float gateEffectScale = 1.0;
+  float triggerDb = -32.0;
+  float gateEffectScale = 1.5;
   noisegate::NoiseGate noiseGate(sampleRate, attackSeconds, decaySeconds, triggerDb);
 
   /* TODO
@@ -405,7 +405,7 @@ void Transmitter::transmit() {
       continue;
     }
 
-    // Signal processing... would be best in another thread?
+    // TODO: Move signal processing to another thread
     noiseGate.apply(*frames, gateLevelFrames);
 	
     volatile unsigned long long frameStartMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
