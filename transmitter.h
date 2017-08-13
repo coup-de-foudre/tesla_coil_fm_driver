@@ -34,13 +34,14 @@
 #ifndef TRANSMITTER_H
 #define TRANSMITTER_H
 
-#include "error_reporter.h"
-#include "audio_format.h"
-#include "abstract_reader.h"
 #include <vector>
 #include <thread>
 #include <mutex>
 #include <boost/lockfree/spsc_queue.hpp>
+//#include "error_reporter.h"
+#include "audio_format.h"
+#include "abstract_reader.h"
+#include "noisegate.h"
 
 #define BUFFER_FRAMES 2048
 
@@ -52,46 +53,46 @@ class Transmitter {
     // https://stackoverflow.com/questions/1008019/c-singleton-design-pattern
 
  public:
-    virtual ~Transmitter();
+  virtual ~Transmitter();
 
-    void play(string filename, string alsaDevice, float frequencyMHz, float spreadMHz, bool loop);
-    void stop();
+  void play(string filename, string alsaDevice, float frequencyMHz, float spreadMHz, bool loop);
+  void stop();
 
-    static Transmitter* getInstance(AbstractReader* reader, float centerFreqMHz, float spreadMHz);
-    static AudioFormat* getFormat(string filename, string alsaDevice);
-    static void run(bool loop);
+  static Transmitter* getInstance(AbstractReader* reader, float centerFreqMHz, float spreadMHz);
+  static AudioFormat* getFormat(string filename, string alsaDevice);
+  static void run(bool loop);
 
 private:
-    Transmitter(AbstractReader* reader);
+  Transmitter(AbstractReader* reader);
 
-    static void transmit();
-    static void setTransmitValue(float value);
+  static void transmit();
+  static void setTransmitValue(float value);
 
-    static unsigned clkSlew(float finalFreqMHz,
-                            float startFreqMHz,
-                            float slewTimeMicroseconds);
-    static unsigned clkShutdownHard(bool lock);
-    static void  clkShutdownSoft();
-    static unsigned clkInitHard(float freqMHz, bool lock);
-    static unsigned clkInitSoft();
+  static unsigned clkSlew(float finalFreqMHz,
+			  float startFreqMHz,
+			  float slewTimeMicroseconds);
+  static unsigned clkShutdownHard(bool lock);
+  static void  clkShutdownSoft();
+  static unsigned clkInitHard(float freqMHz, bool lock);
+  static unsigned clkInitSoft();
 
-    static unsigned clkDivisorSet(float targetFreqMHz);
-    void setCenterFreqMHz(float centerFreqMHz);
-    void setSpreadMHz(float spreadMHz);
-    static void garbageCollector(boost::lockfree::spsc_queue<std::vector<float>*> *garbage);
+  static unsigned clkDivisorSet(float targetFreqMHz);
 
-    static AbstractReader* reader_;
-    static float centerFreqMHz_;
-    static float spreadMHz_;
-    static float currentValue_;
-    static void* mmapPeripherals_;
-    static unsigned clockOffsetAddr_;
-    volatile static bool doStop_;
-    static std::mutex transmitMutex_;
+  static float getCurrentTransmitFrequencyMHz();
+  void setCenterFreqMHz(float centerFreqMHz);
+  void setSpreadMHz(float spreadMHz);
+  static void garbageCollector(boost::lockfree::spsc_queue<std::vector<float>*> *garbage);
 
+  static AbstractReader* reader_;
+  static float centerFreqMHz_;
+  static float spreadMHz_;
+  static float currentValue_;
+  static void* mmapPeripherals_;
+  static unsigned clockOffsetAddr_;
+  volatile static bool doStop_;
+  static std::mutex transmitMutex_;
 
-    static boost::lockfree::spsc_queue<std::vector<float>*> garbage;
-
+  static boost::lockfree::spsc_queue<std::vector<float>*> garbage;
 };
 
 #endif // TRANSMITTER_H

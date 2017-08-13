@@ -31,22 +31,18 @@
     WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#include <sstream>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <thread>
+#include <pthread.h>
+#include <plog/Log.h>
+
 #include "transmitter.h"
 #include "wave_reader.h"
 #include "alsa_reader.h"
 #include "peripherals.h"
-#include <sstream>
-#include <unistd.h>
-#include <sys/mman.h>
-#include <plog/Log.h>
-#include <thread>
-#include <pthread.h>
-
-#include <iostream>
-
-using std::ostringstream;
-
-#define STDIN_READ_DELAY 700000
+#include "noisegate.h"
 
 #define HEX_STREAM(X) "0x" << std::setfill('0') << std::setw(8) << std::hex << X
 
@@ -63,6 +59,7 @@ std::mutex Transmitter::transmitMutex_;
 unsigned Transmitter::clockOffsetAddr_ = CM_GP0CTL;
 AbstractReader* Transmitter::reader_ = NULL;
 
+
 // Garbage from transmitter
 boost::lockfree::spsc_queue<std::vector<float>*> Transmitter::garbage(256);
 
@@ -78,40 +75,40 @@ const unsigned updateDelayMicroseconds_ = 10; // 100 kHz updates
  * Memory-map the peripherals addresses
  */
 inline void* mmapPeripherals() {
-    LOG_DEBUG << "Memory mapping peripherals";
+  LOG_DEBUG << "Memory mapping peripherals";
 
-    int memFd;
-    if ((memFd = open("/dev/mem", O_RDWR | O_SYNC)) < 0) {
-        throw ErrorReporter("Cannot open /dev/mem (permission denied)");
-    }
-    void* peripheralsBase = mmap(NULL,
-                                 PERIPHERALS_LENGTH,
-                                 PROT_READ | PROT_WRITE,
-                                 MAP_SHARED,
-                                 memFd,
-                                 PERIPHERALS_BASE);
-    close(memFd);
-    if (peripheralsBase == MAP_FAILED) {
-        throw ErrorReporter("Cannot obtain access to peripherals_ (mmap error)");
-    }
-    return peripheralsBase;
+  int memFd;
+  if ((memFd = open("/dev/mem", O_RDWR | O_SYNC)) < 0) {
+    throw ErrorReporter("Cannot open /dev/mem (permission denied)");
+  }
+  void* peripheralsBase = mmap(NULL,
+			       PERIPHERALS_LENGTH,
+			       PROT_READ | PROT_WRITE,
+			       MAP_SHARED,
+			       memFd,
+			       PERIPHERALS_BASE);
+  close(memFd);
+  if (peripheralsBase == MAP_FAILED) {
+    throw ErrorReporter("Cannot obtain access to peripherals_ (mmap error)");
+  }
+  return peripheralsBase;
 }
 
 
 Transmitter::Transmitter(AbstractReader* reader) {
-    LOG_DEBUG << "Initializing transmitter";
-    reader_ = reader;
-    mmapPeripherals_ = mmapPeripherals();
+  LOG_DEBUG << "Initializing transmitter";
+  reader_ = reader;
+  mmapPeripherals_ = mmapPeripherals();
 }
 
 
 Transmitter::~Transmitter() {
-    LOG_DEBUG << "Deleting transmitter";
-    if (!doStop_) {
-        this->stop();
-    }
-    reader_->stop(true);
-    munmap((void*)mmapPeripherals_, PERIPHERALS_LENGTH);
+  LOG_DEBUG << "Deleting transmitter";
+  if (!doStop_) {
+    this->stop();
+  }
+  reader_->stop(true);
+  munmap((void*)mmapPeripherals_, PERIPHERALS_LENGTH);
 }
 
 
@@ -121,10 +118,10 @@ Transmitter::~Transmitter() {
 Transmitter* Transmitter::getInstance(AbstractReader* reader,
                                       float centerFreqMHz,
                                       float spreadMHz) {
-    centerFreqMHz_ = centerFreqMHz;
-    spreadMHz_ = spreadMHz;
-    static Transmitter instance(reader);
-    return &instance;
+  centerFreqMHz_ = centerFreqMHz;
+  spreadMHz_ = spreadMHz;
+  static Transmitter instance(reader);
+  return &instance;
 }
 
 
@@ -137,59 +134,63 @@ unsigned Transmitter::clkSlew(float finalFreqMHz,
                               float startFreqMHz,
                               float slewTimeMicroseconds) {
 
-    LOG_DEBUG << "Clock slew: finalFreqMHz=" << finalFreqMHz
-              << ", startFreqMHz=" << startFreqMHz
-              << ", slewTimeMicroseconds=" << (double)slewTimeMicroseconds;
+  LOG_DEBUG << "Clock slew: finalFreqMHz=" << finalFreqMHz
+	    << ", startFreqMHz=" << startFreqMHz
+	    << ", slewTimeMicroseconds=" << (double)slewTimeMicroseconds;
 
-    volatile unsigned long long startMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
-    volatile unsigned long long currentMicroseconds = startMicroseconds;
+  volatile unsigned long long startMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+  volatile unsigned long long currentMicroseconds = startMicroseconds;
 
-    while (true) {
-        if (slewTimeMicroseconds < currentMicroseconds - startMicroseconds) {
-            break;
-        }
-        usleep(updateDelayMicroseconds_);
-        currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
-        float targetFreqMHz = startFreqMHz +
-            ((double)(currentMicroseconds - startMicroseconds) / (double)(slewTimeMicroseconds)) *
-            (finalFreqMHz - startFreqMHz);
-        clkDivisorSet(targetFreqMHz);
+  while (true) {
+    if (slewTimeMicroseconds < currentMicroseconds - startMicroseconds) {
+      break;
     }
-
-    // Final update to target frequency
     usleep(updateDelayMicroseconds_);
-    return clkDivisorSet(finalFreqMHz);
+    currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+    float targetFreqMHz = startFreqMHz +
+      ((double)(currentMicroseconds - startMicroseconds) / (double)(slewTimeMicroseconds)) *
+      (finalFreqMHz - startFreqMHz);
+    clkDivisorSet(targetFreqMHz);
+  }
+
+  // Final update to target frequency
+  usleep(updateDelayMicroseconds_);
+  return clkDivisorSet(finalFreqMHz);
 }
 
 
 /**
  * Hard shutdown of the clock
  *
+ * Does not turn on the clock if it is off.
+ *
  * Returns the clock manager state prior to shutdown
  */
 unsigned Transmitter::clkShutdownHard(bool lock=true) {
-    LOG_DEBUG << "Hard shutdown of clock " << HEX_STREAM(clockOffsetAddr_);
+  LOG_DEBUG << "Hard shutdown of clock " << HEX_STREAM(clockOffsetAddr_);
 
-    // Lock the mutex for this scope
-    if (lock) {
-        LOG_DEBUG << "Acquiring lock...";
-        transmitMutex_.lock();
+  // Lock the mutex for this scope
+  if (lock) {
+    LOG_DEBUG << "Acquiring lock...";
+    transmitMutex_.lock();
+  }
+  // Disable clock and wait for it to become available
+  unsigned cmCtlInitialState = ACCESS(mmapPeripherals_, clockOffsetAddr_);
+  ACCESS(mmapPeripherals_, clockOffsetAddr_) = (cmCtlInitialState & 0x00FFFFEF) | CM_PASSWD;
+  while (true) {
+    volatile bool enabledOrBusy =
+      ACCESS(mmapPeripherals_, clockOffsetAddr_) & (0x01 << 4 | 0x01 << 7);
+    if (!enabledOrBusy) {
+      LOG_DEBUG << "Clock shutdown complete";
+      break;
     }
-    // Disable clock and wait for it to become available
-    unsigned cmCtlInitialState = ACCESS(mmapPeripherals_, clockOffsetAddr_);
-    ACCESS(mmapPeripherals_, clockOffsetAddr_) = (cmCtlInitialState & 0x00FFFFEF) | CM_PASSWD;
-    while (true) {
-        volatile bool enabledOrBusy =
-            ACCESS(mmapPeripherals_, clockOffsetAddr_) & (0x01 << 4 | 0x01 << 7);
-        if (!enabledOrBusy) {
-            LOG_DEBUG << "Clock shutdown complete";
-            break;
-        }
-        usleep(1);
-    }
+    usleep(1);
+  }
 
-    transmitMutex_.unlock();
-    return cmCtlInitialState;
+  // Reset clock divisor to 1
+  ACCESS(mmapPeripherals_, CM_GP0DIV) = CM_PASSWD | 0x00000001;
+  transmitMutex_.unlock();
+  return cmCtlInitialState;
 }
 
 
@@ -199,31 +200,32 @@ unsigned Transmitter::clkShutdownHard(bool lock=true) {
  * Returns the clock divisor.
  */
 unsigned Transmitter::clkInitHard(float freqMHz, bool lock=true) {
-    LOG_DEBUG << "Hard-init of clock " << HEX_STREAM(clockOffsetAddr_)
-              << " to frequency " << freqMHz << " MHz";
+  LOG_DEBUG << "Hard-init of clock " << HEX_STREAM(clockOffsetAddr_)
+	    << " to frequency " << freqMHz << " MHz";
 
-    if (lock) {
-        LOG_DEBUG << "Acquiring lock...";
-        transmitMutex_.lock();
-    }
+  if (lock) {
+    LOG_DEBUG << "Acquiring lock...";
+    transmitMutex_.lock();
+  }
 
-    clkShutdownHard(false);
+  clkShutdownHard(false);
 
-    unsigned clkDivisor = clkDivisorSet(freqMHz);
+  unsigned clkDivisor = clkDivisorSet(freqMHz);
 
-    // Set GPIO pin 4 alternate function 1 (GPCLK0)
-    ACCESS(mmapPeripherals_, GPFSEL0) =
-        (ACCESS(mmapPeripherals_, GPFSEL0) & 0xFFFF8FFF) | (0x01 << 14);
+  // Set GPIO pin 4 alternate function 1 (GPCLK0)
+  ACCESS(mmapPeripherals_, GPFSEL0) =
+    (ACCESS(mmapPeripherals_, GPFSEL0) & 0xFFFF8FFF) | (0x01 << 14);
 
-    // Set up the clock manager
-    ACCESS(mmapPeripherals_, CM_GP0CTL) =
-        CM_PASSWD | CM_MASH1 | CM_ENAB | CM_SRC_PLLD;
+  // Set up the clock manager
+  ACCESS(mmapPeripherals_, CM_GP0CTL) =
+    CM_PASSWD | CM_MASH1 | CM_ENAB | CM_SRC_PLLD;
 
-    if (lock) {
-        transmitMutex_.unlock();
-    }
-    return clkDivisor;
+  if (lock) {
+    transmitMutex_.unlock();
+  }
+  return clkDivisor;
 }
+
 
 /**
  * Soft shutdown of the clock
@@ -231,19 +233,20 @@ unsigned Transmitter::clkInitHard(float freqMHz, bool lock=true) {
  * Returns the state of the clock manager prior to shutdown
  */
 void Transmitter::clkShutdownSoft() {
-    LOG_DEBUG << "Soft shutdown of clock";
-    LOG_DEBUG << "Acquiring lock...";
-    transmitMutex_.lock();
-    volatile bool enabled =
-        ACCESS(mmapPeripherals_, clockOffsetAddr_) & (0x01 << 4);
+  LOG_DEBUG << "Soft shutdown of clock";
+  LOG_DEBUG << "Acquiring lock...";
+  transmitMutex_.lock();
 
-    if (enabled) {
-        clkSlew(centerFreqMHz_ + softOffDifferenceMHz_, centerFreqMHz_, slewTimeMicroseconds_);
-        clkShutdownHard(false);
-    } else {
-        LOG_DEBUG << "Clock is not enabled. Not shutitng down.";
-    }
-    transmitMutex_.unlock();
+  volatile bool enabled =
+    ACCESS(mmapPeripherals_, clockOffsetAddr_) & (0x01 << 4);
+  float currentFrequencyMHz = getCurrentTransmitFrequencyMHz();
+  if (enabled) {
+    clkSlew(centerFreqMHz_ + softOffDifferenceMHz_, currentFrequencyMHz, slewTimeMicroseconds_);
+  } else {
+    LOG_DEBUG << "Clock is not enabled. No slew necessary.";
+  }
+  clkShutdownHard(false);
+  transmitMutex_.unlock();
 }
 
 
@@ -253,11 +256,11 @@ void Transmitter::clkShutdownSoft() {
  * Returns final clock divisor.
  */
 unsigned Transmitter::clkInitSoft() {
-    LOG_DEBUG << "Starting soft-init of clock to " << centerFreqMHz_ << " MHz";
-    float startFreqMHz =  centerFreqMHz_ + softOffDifferenceMHz_;
-    std::lock_guard<std::mutex> lock(transmitMutex_);
-    clkInitHard(startFreqMHz, false);
-    return clkSlew(centerFreqMHz_,  centerFreqMHz_ + softOffDifferenceMHz_, slewTimeMicroseconds_);
+  LOG_DEBUG << "Starting soft-init of clock to " << centerFreqMHz_ << " MHz";
+  float startFreqMHz =  centerFreqMHz_ + softOffDifferenceMHz_;
+  std::lock_guard<std::mutex> lock(transmitMutex_);
+  clkInitHard(startFreqMHz, false);
+  return clkSlew(centerFreqMHz_,  centerFreqMHz_ + softOffDifferenceMHz_, slewTimeMicroseconds_);
 }
 
 
@@ -267,28 +270,36 @@ unsigned Transmitter::clkInitSoft() {
  * Returns the new clock divisor.
  */
 inline unsigned Transmitter::clkDivisorSet(float targetFreqMHz) {
-    const float divisor = PLLD_FREQ_MHZ / targetFreqMHz;
-    unsigned clockDivisor;
-    if (divisor <= 0.0) {
-        clockDivisor = 1;
-    } else if (divisor >= 4095.5) {
-        clockDivisor = 1 << 24;
-    } else {
-        clockDivisor = (unsigned) (divisor * 4096.0 + 0.5);
-    }
-
-    ACCESS(mmapPeripherals_, CM_GP0DIV) = CM_PASSWD | (0x00FFFFFF & clockDivisor);
-    return clockDivisor;
+  const float divisor = PLLD_FREQ_MHZ / targetFreqMHz;
+  unsigned clockDivisor;
+  if (divisor <= 0.0) {
+    clockDivisor = 1;
+  } else if (divisor >= 4095.5) {
+    clockDivisor = 1 << 24;
+  } else {
+    clockDivisor = (unsigned) (divisor * 4096.0 + 0.5);
+  }
+  ACCESS(mmapPeripherals_, CM_GP0DIV) = CM_PASSWD | (0x00FFFFFF & clockDivisor);
+  return clockDivisor;
 }
 
+
+/**
+ * Read the current transmission frequency from the peripheral bus
+ */
+inline float Transmitter::getCurrentTransmitFrequencyMHz() {
+  volatile unsigned clockDivisor = 0x00FFFFFF & ACCESS(mmapPeripherals_, CM_GP0DIV);
+  float divisor = ((float) clockDivisor) / 4096.0;
+  return PLLD_FREQ_MHZ / divisor;
+}
 
 /**
  * Set the transmit frequency offset from the current spreadFreqMHz and centerFreqMHz
  */
 inline void Transmitter::setTransmitValue(float value){
-    currentValue_ = value;
-    float targetFreqMHz = (spreadMHz_ * value + centerFreqMHz_);
-    clkDivisorSet(targetFreqMHz);
+  currentValue_ = value;
+  float targetFreqMHz = (spreadMHz_ * value + centerFreqMHz_);
+  clkDivisorSet(targetFreqMHz);
 }
 
 
@@ -296,8 +307,8 @@ inline void Transmitter::setTransmitValue(float value){
  * Set the center frequency and update the transmission
  */
 inline void Transmitter::setCenterFreqMHz(float centerFreqMHz) {
-    centerFreqMHz_ = centerFreqMHz;
-    return setTransmitValue(currentValue_);
+  centerFreqMHz_ = centerFreqMHz;
+  return setTransmitValue(currentValue_);
 }
 
 
@@ -305,8 +316,8 @@ inline void Transmitter::setCenterFreqMHz(float centerFreqMHz) {
  * Set the spread and update the transmission
  */
 inline void Transmitter::setSpreadMHz(float spreadMHz) {
-    spreadMHz_ = spreadMHz;
-    return setTransmitValue(currentValue_);
+  spreadMHz_ = spreadMHz;
+  return setTransmitValue(currentValue_);
 }
 
 
@@ -314,25 +325,25 @@ inline void Transmitter::setSpreadMHz(float spreadMHz) {
  * Initialize and run the transmitter in a separate thread
  */
 void Transmitter::run(bool loop) {
-    clkInitSoft();
-    std::thread garbageThread(Transmitter::garbageCollector, &garbage);
-    do {
-        LOG_DEBUG << "Starting new thransmit thread";
-        sched_param sch_params;
-        sch_params.sched_priority = 99;
-        std::thread thread (Transmitter::transmit);
+  clkInitSoft();
+  std::thread garbageThread(Transmitter::garbageCollector, &garbage);
+  do {
+    LOG_DEBUG << "Starting new thransmit thread";
+    std::thread thread (Transmitter::transmit);
 #if 0
-        if(pthread_setschedparam(thread.native_handle(), SCHED_RR, &sch_params)) {
-            LOG_ERROR << "Failed to set Thread scheduling : " << std::strerror(errno);
-        }
+    sched_param sch_params;
+    sch_params.sched_priority = 99;
+    if(pthread_setschedparam(thread.native_handle(), SCHED_RR, &sch_params)) {
+      LOG_ERROR << "Failed to set Thread scheduling : " << std::strerror(errno);
+    }
 #endif
-        thread.join();
-        LOG_DEBUG << "Transmit thread finished. Resetting reader.";
-        reader_->reset();
-    } while (!doStop_ && loop);
+    thread.join();
+    LOG_DEBUG << "Transmit thread finished. Resetting reader.";
+    reader_->reset();
+  } while (!doStop_ && loop);
 
-    doStop_ = true;
-    garbageThread.join();
+  doStop_ = true;
+  garbageThread.join();
 }
 
 
@@ -340,18 +351,18 @@ void Transmitter::run(bool loop) {
  * Delete the garbage from the queue
  */
 void Transmitter::garbageCollector(boost::lockfree::spsc_queue<std::vector<float>*> *garbage) {
-    LOG_DEBUG << "Garbage collector started";
-    while (!doStop_) {
-        usleep(500000); // TODO: Allow configuration
-        int numCollected = 0;
-        garbage->consume_all([&numCollected](vector<float>* element) -> void {
-                delete element;
-                numCollected++;
-            });
-        if (numCollected > 0) {
-            LOG_DEBUG << "Garbage collected " << numCollected << " buffers";
-        }
+  LOG_DEBUG << "Garbage collector started";
+  while (!doStop_) {
+    usleep(500000); // TODO: Allow configuration
+    int numCollected = 0;
+    garbage->consume_all([&numCollected](vector<float>* element) -> void {
+	delete element;
+	numCollected++;
+      });
+    if (numCollected > 0) {
+      LOG_DEBUG << "Garbage collected " << numCollected << " buffers";
     }
+  }
 }
 
 
@@ -360,57 +371,74 @@ void Transmitter::garbageCollector(boost::lockfree::spsc_queue<std::vector<float
  */
 void Transmitter::transmit() {
 
-    // TODO: Set this as a class variable in run()
-    AudioFormat* format = reader_->getFormat();
-    float sampleRate = (float)format->sampleRate;
-    delete format;
+  // TODO: Set this as a class variable in run()
+  AudioFormat* format = reader_->getFormat();
+  float sampleRate = (float)format->sampleRate;
+  delete format;
 
-    vector<float>* frames = NULL;
+  vector<float>* frames = NULL;
 
-    LOG_DEBUG << "Starting transmitter with sample rate " << sampleRate << "Hz";
-    LOG_DEBUG << "Acquiring transmit lock...";
-    transmitMutex_.lock();
-    LOG_DEBUG << "Lock acquired";
+  float attackSeconds = 0.005;
+  float decaySeconds = 0.5;
+  float triggerDb = -32.0;
+  float gateEffectScale = 1.5;
+  noisegate::NoiseGate noiseGate(sampleRate, attackSeconds, decaySeconds, triggerDb);
 
-    // TODO: Remove reader_ from this transmitter code a queue in run()
-    // so that this thread does not have any signal processing to do, just
-    // timing
-    while (!doStop_ && !reader_->isEnd()) {
-        // Spin-wait
-        if (!reader_->getFrames(frames)) {
-            continue;
-        }
+  /* TODO
+  float pulseHalfLife = 0.2;
+  float pulseEffectScale = 1.0;
+  noisegate::PowerEstimator pulse(sampleRate, pulseHalfLife);
+  */
+  
+  LOG_DEBUG << "Starting transmitter with sample rate " << sampleRate << "Hz";
+  LOG_DEBUG << "Acquiring transmit lock...";
+  transmitMutex_.lock();
+  LOG_DEBUG << "Lock acquired";
 
-        // TODO: Signal processing... would be best in another thread?
-        volatile unsigned long long frameStartMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
-        unsigned bufferSize = frames->size();
-        for (float ii = 0; ii < bufferSize; ii++) {
-            unsigned long nextFrameTrigger = (unsigned) ((ii * 1000000.0) / sampleRate + 0.5);
-
-            volatile unsigned long long currentMicroseconds;
-
-            // Spin-wait
-            do {
-                currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
-            } while(!doStop_ &&
-                    ((currentMicroseconds - frameStartMicroseconds) < nextFrameTrigger));
-
-            if (doStop_) break;
-            setTransmitValue((*frames)[ii]);
-        }
-        // Push frames to garbage queue for deletion elsewhere
-        garbage.push(frames);
+  // TODO: Remove reader_ from this transmitter code a queue in run()
+  // so that this thread does not have any signal processing to do, just
+  // timing
+  vector<float> gateLevelFrames(1024);
+  while (!doStop_ && !reader_->isEnd()) {
+    // Spin-wait
+    if (!reader_->getFrames(frames)) {
+      continue;
     }
-    transmitMutex_.unlock();
 
-    LOG_DEBUG << "Transmitter shut down";
+    // TODO: Move signal processing to another thread
+    noiseGate.apply(*frames, gateLevelFrames);
+	
+    volatile unsigned long long frameStartMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+    unsigned bufferSize = frames->size();
+    for (float ii = 0; ii < bufferSize; ii++) {
+      unsigned long nextFrameTrigger = (unsigned) ((ii * 1000000.0) / sampleRate + 0.5);
+
+      volatile unsigned long long currentMicroseconds;
+
+      // Spin-wait
+      do {
+	currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+      } while(!doStop_ &&
+	      ((currentMicroseconds - frameStartMicroseconds) < nextFrameTrigger));
+
+      if (doStop_) break;
+
+      float nextOutputValue = (*frames)[ii] + gateEffectScale * gateLevelFrames[ii];
+      setTransmitValue(nextOutputValue);
+    }
+    // Push frames to garbage queue for deletion elsewhere
+    garbage.push(frames);
+  }
+  transmitMutex_.unlock();
+
+  LOG_DEBUG << "Transmitter shut down";
 }
 
 
 void Transmitter::stop()
 {
-    reader_->stop(false);
-    doStop_ = true;
-    clkShutdownSoft();
+  reader_->stop(false);
+  doStop_ = true;
+  clkShutdownSoft();
 }
 
