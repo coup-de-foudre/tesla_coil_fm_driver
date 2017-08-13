@@ -404,10 +404,9 @@ void Transmitter::transmit() {
     if (!reader_->getFrames(frames)) {
       continue;
     }
-
-    // TODO: Move signal processing to another thread
+    // We're getting jitter each frame start
+    // TODO: Move signal processing to another thread since it takes time
     noiseGate.apply(*frames, gateLevelFrames);
-	
     volatile unsigned long long frameStartMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
     unsigned bufferSize = frames->size();
     for (float ii = 0; ii < bufferSize; ii++) {
