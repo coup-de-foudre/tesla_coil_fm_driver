@@ -378,53 +378,55 @@ void Transmitter::transmit() {
 
   vector<float>* frames = NULL;
 
-  float attackSeconds = 0.005;
-  float decaySeconds = 0.5;
+  float attackSeconds = 0.007;
+  float decaySeconds = 0.3;
   float triggerDb = -32.0;
-  float gateEffectScale = 1.5;
+  float gateEffectScale = 0.75;
   noisegate::NoiseGate noiseGate(sampleRate, attackSeconds, decaySeconds, triggerDb);
 
-  /* TODO
-  float pulseHalfLife = 0.2;
-  float pulseEffectScale = 1.0;
-  noisegate::PowerEstimator pulse(sampleRate, pulseHalfLife);
-  */
+  float pulseHalfLife = 0.1;
+  float pulseEffectScale = 0.1;
+  noisegate::PowerEstimator pulse(sampleRate,  pulseHalfLife);
   
   LOG_DEBUG << "Starting transmitter with sample rate " << sampleRate << "Hz";
   LOG_DEBUG << "Acquiring transmit lock...";
   transmitMutex_.lock();
   LOG_DEBUG << "Lock acquired";
 
-  // TODO: Remove reader_ from this transmitter code a queue in run()
-  // so that this thread does not have any signal processing to do, just
-  // timing
-  vector<float> gateLevelFrames(1024);
+  volatile unsigned long long startMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+  unsigned numFrames = 0;
   while (!doStop_ && !reader_->isEnd()) {
     // Spin-wait
     if (!reader_->getFrames(frames)) {
+      numFrames = 0;
+      startMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
       continue;
     }
-
-    // TODO: Move signal processing to another thread
-    noiseGate.apply(*frames, gateLevelFrames);
-	
-    volatile unsigned long long frameStartMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+    
+    if (numFrames == 0) {
+      LOG_DEBUG << "Buffer underrun detected";
+    }
+    
     unsigned bufferSize = frames->size();
-    for (float ii = 0; ii < bufferSize; ii++) {
-      unsigned long nextFrameTrigger = (unsigned) ((ii * 1000000.0) / sampleRate + 0.5);
+    for (unsigned ii = 0; ii < bufferSize; ii++) {
+      float nextFrame = (*frames)[ii];
+      float gateLevel = noiseGate.apply(nextFrame);
+      float pulseLevel = pulse.apply(nextFrame);
+      float nextOutputValue = nextFrame +
+	gateEffectScale * gateLevel +
+	pulseEffectScale * pulseLevel;
 
+      unsigned long nextFrameTrigger = (unsigned) ((++numFrames * 1000000.0) / sampleRate + 0.5);
+
+      // Spin-wait for time
       volatile unsigned long long currentMicroseconds;
-
-      // Spin-wait
       do {
 	currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
       } while(!doStop_ &&
-	      ((currentMicroseconds - frameStartMicroseconds) < nextFrameTrigger));
+	      ((currentMicroseconds - startMicroseconds) < nextFrameTrigger));
+      setTransmitValue(nextOutputValue);
 
       if (doStop_) break;
-
-      float nextOutputValue = (*frames)[ii] + gateEffectScale * gateLevelFrames[ii];
-      setTransmitValue(nextOutputValue);
     }
     // Push frames to garbage queue for deletion elsewhere
     garbage.push(frames);
