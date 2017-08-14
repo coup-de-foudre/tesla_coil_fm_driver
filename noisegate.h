@@ -83,21 +83,24 @@ namespace noisegate {
       gateLevelBuffer.resize(inputBuffer.size());
 
       for (unsigned i = 0; i < inputBuffer.size(); i++) {
-
-	float powerLevel = powerEstimator_.apply(inputBuffer[i]);
-	bool gateIsOff = powerLevel > triggerLevel_;
-	float nextOutput;
-
-	if (gateIsOff) {
-	  nextOutput = attackFactor_ * lastOutput_;
-	} else {
-	  nextOutput = 1.0 - decayFactor_ * (1.0 - lastOutput_); 
-	}
-
-	gateLevelBuffer[i] = nextOutput;
-	lastOutput_ = nextOutput;
+	gateLevelBuffer[i] = this->apply(inputBuffer[i]);
       }
+    }
 
+    /**
+     * Apply noise gate to the next frame
+     */
+    float apply(float input) {
+      float powerLevel = powerEstimator_.apply(input);
+      bool gateIsOff = powerLevel > triggerLevel_;
+      float nextOutput;
+      if (gateIsOff) {
+	nextOutput = attackFactor_ * lastOutput_;
+      } else {
+	nextOutput = 1.0 - decayFactor_ * (1.0 - lastOutput_); 
+      }
+      lastOutput_ = nextOutput;
+      return nextOutput;
     }
     
   private:
