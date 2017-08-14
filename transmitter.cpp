@@ -384,8 +384,8 @@ void Transmitter::transmit() {
   float gateEffectScale = 0.75;
   noisegate::NoiseGate noiseGate(sampleRate, attackSeconds, decaySeconds, triggerDb);
 
-  float pulseHalfLife = 0.1;
-  float pulseEffectScale = 0.1;
+  float pulseHalfLife = 0.2;
+  float pulseEffectScale = 0.05;
   noisegate::PowerEstimator pulse(sampleRate,  pulseHalfLife);
   
   LOG_DEBUG << "Starting transmitter with sample rate " << sampleRate << "Hz";
