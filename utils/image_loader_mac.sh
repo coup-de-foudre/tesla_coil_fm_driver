@@ -24,6 +24,7 @@ DISK=${2}
 IP_ADDRESS=${3}
 
 FILE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SD_VOLUME="/Volumes/boot"
 
 if sudo diskutil unmountDisk ${DISK}; then
     echo "Disk ${DISK} not mounted";
@@ -32,7 +33,10 @@ fi
 # Copy image
 sudo dd if=${IMAGE} of=${DISK} bs=2m conv=sync
 
-${FILE_DIR}/configure_sd_card.sh ${DISK} ${IP_ADDRESS}
+sudo diskutil unmountDisk ${DISK}
+sudo diskutil mountDisk ${DISK}
+
+${FILE_DIR}/configure_sd_card.sh ${DISK} ${IP_ADDRESS} ${SD_VOLUME}
 
 
 # Eject the disk

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -e 
 
 USAGE="USAGE: ${0} <image> <sd-disk> <ip-address>"
 HELP="Load an image onto an SD card
@@ -24,21 +23,27 @@ DISK=${2}
 IP_ADDRESS=${3}
 
 FILE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SD_VOLUME="/var/host/media/removable/boot"
 
-exit -1 # TODO
-
-if sudo diskutil unmountDisk ${DISK}; then
-    echo "Disk ${DISK} not mounted";
+if df -h | grep "${DISK}"; then
+    echo "Disk ${DISK} mounted. Unmounting ${DISK}*";
+    sudo umount ${DISK}*
 fi
 
+
 # Copy image
-sudo dd if=${IMAGE} of=${DISK} bs=2m conv=sync
+echo "Copying image ${IMAGE} to ${DISK}"
+sudo dd if=${IMAGE} of=${DISK} bs=4M conv=sync status=progress
 
-${FILE_DIR}/configure_sd_card.sh ${DISK} ${IP_ADDRESS}
+if ! sudo mount ${DISK}*; then
+    echo "No biggie...";
+fi
 
+${FILE_DIR}/configure_sd_card.sh ${DISK} ${IP_ADDRESS} ${SD_VOLUME}
 
 # Eject the disk
-sudo diskutil eject ${DISK}
+sudo umount ${DISK}*
+
 
 read -p "
    Transfer SD card to Pi. When it's booted, press enter to continue setup process.
