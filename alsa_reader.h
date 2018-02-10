@@ -44,10 +44,10 @@
 #include "error_reporter.h"
 
 #define MAX_STREAM_SIZE 2097152
-#define STREAM_SAMPLE_RATE 44100
+#define STREAM_SAMPLE_RATE 48000
 #define STREAM_BITS_PER_SAMPLE 16
 #define STREAM_CHANNELS 2
-#define ALSA_FRAME_BUFFER_LENGTH 1024
+#define ALSA_FRAME_BUFFER_LENGTH 512
 
 using std::vector;
 

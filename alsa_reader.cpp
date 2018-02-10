@@ -47,7 +47,7 @@ using std::ostringstream;
 
 bool AlsaReader::doStop = false;
 bool AlsaReader::isDataAccess = false;
-std::string AlsaReader::alsaDevice_ = "plughw:1,0";
+std::string AlsaReader::alsaDevice_ = "hw:1,0";
 
 boost::lockfree::queue<std::vector<float>*> AlsaReader::queue(1);
 
