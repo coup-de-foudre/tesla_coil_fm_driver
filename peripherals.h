@@ -1,5 +1,15 @@
-#ifndef FM_TRANSMITTER_PERIPHERALS_H
-#define FM_TRANSMITTER_PERIPHERALS_H
+/*
+
+  Copyright (c) 2017-2018, Michael McCoy
+
+  All rights reserved.
+
+ */
+
+#ifndef BCM2837_PERIPHERALS_H
+#define BCM2837_PERIPHERALS_H
+
+#include <exception>
 
 /**
  *  Base (physical) addresses for peripherals
@@ -78,19 +88,26 @@
  * CM: General-purpose clock manager
  */
 // Control registers
-#define CM_GP0CTL 0x00101070
-#define CM_GP1CTL 0x00101078
-#define CM_GP2CTL 0x00101080
+#define CM_GP0CTL  0x00101070
+#define CM_GP1CTL  0x00101078
+#define CM_GP2CTL  0x00101080
+#define CM_PCMCTL  0x00101098
+#define CM_PWMCTL  0x001010a0
+#define CM_UARTCTL 0x001010f0
 
 // Clock divisor registers
-#define CM_GP0DIV 0x00101074
-#define CM_GP1DIV 0x0010107c
-#define CM_GP2DIV 0x00101084
+#define CM_GP0DIV  0x00101074
+#define CM_GP1DIV  0x0010107c
+#define CM_GP2DIV  0x00101084
+#define CM_PCMDIV  0x0010109c
+#define CM_PWMDIV  0x001010a4
+#define CM_UARTDIV 0x001010f4
 
 // Clock-manger password (required to write to *CTL and *DIV)
 #define CM_PASSWD 0x5A000000
 
 // Clock MASH filters
+#define CM_MASH0 (0x00 << 9)
 #define CM_MASH1 (0x01 << 9)
 #define CM_MASH2 (0x02 << 9)
 #define CM_MASH3 (0x03 << 9)
@@ -118,6 +135,7 @@
 #define CM_SRC_HDMI (0x07)
 
 // Clock frequencies
+#define OSC_FREQ_MHZ  19.2
 #define PLLA_FREQ_MHZ 650.0
 #define PLLC_FREQ_MHZ 200.0
 #define PLLD_FREQ_MHZ 500.0
@@ -140,4 +158,108 @@
 #define ACCESS64(base, offset) *(volatile unsigned long long*)((int)base + offset)
 
 
-#endif //FM_TRANSMITTER_PERIPHERALS_H
+namespace peripherals {
+
+  struct MemoryMapPeripheralsException : public std::exception {
+
+    const char* what() const throw () {
+      return "Unable to memory map peripherals";
+    }
+
+  };
+
+  /**
+   * Low-level access to BCM2837 SoC peripherals
+   */
+  class Peripherals {
+
+    // Uses singleton pattern
+    // https://stackoverflow.com/questions/1008019/c-singleton-design-pattern
+
+  public:
+
+    /**
+     * Get instance of the peripherals class
+     */
+    static Peripherals& getInstance() {
+      static Peripherals instance;
+      return instance;
+    }
+
+    /**
+     * Get the base address of the peripherals
+     *
+     * @return: The base address of the peripherals,
+     *          or NULL if unable to access the peripherals
+     */
+    void* getPeripheralsBase() {
+      return peripheralsBase_;
+    }
+
+    /**
+     * Read the microseconds from the SystemTimer register
+     */
+    inline unsigned long long systemTimerMicroseconds() {
+      return ACCESS64(peripheralsBase_, ST_CLO);
+    }
+
+
+  private:
+
+    /**
+     * Memory-map the peripherals on contsruction
+     */
+    Peripherals() {
+      peripheralsBase_ = mmapPeripherals();
+    }
+
+    /**
+     * Unmap peripherals on destruction
+     *
+     * This is completely unnecessary for singletons, but this
+     * is the necessary "cleanup" in case someone refactors the
+     * code.
+     */
+    ~Peripherals() {
+      munmap((void*)peripheralsBase_, PERIPHERALS_LENGTH);
+      peripheralsBase_ = (void*) NULL;
+    }
+
+    /**
+     * Memory-map the peripherals addresses
+     */
+    static void* mmapPeripherals() {
+      int memFd;
+      if ((memFd = open("/dev/mem", O_RDWR | O_SYNC)) < 0) {
+	return (void*) NULL;
+      }
+
+      void* mappedBase = mmap(NULL,
+			      PERIPHERALS_LENGTH,
+			      PROT_READ | PROT_WRITE,
+
+			      MAP_SHARED,
+			      memFd,
+			      PERIPHERALS_BASE);
+      close(memFd);
+
+      if (mappedBase == MAP_FAILED) {
+	throw new MemoryMapPeripheralsException();
+      }
+
+      return mappedBase;
+    }
+
+    void* peripheralsBase_;
+
+  public:
+
+    // Ensures singletons
+    Peripherals(Peripherals const&) = delete;
+    void operator=(Peripherals const&) = delete;
+
+  };
+
+} // namespace peripherals
+
+#endif // BCM2837_PERIPHERALS_H

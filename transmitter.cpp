@@ -59,6 +59,7 @@ std::mutex Transmitter::transmitMutex_;
 unsigned Transmitter::clockOffsetAddr_ = CM_GP0CTL;
 AbstractReader* Transmitter::reader_ = NULL;
 
+peripherals::Peripherals& Transmitter::peripherals_ = peripherals::Peripherals::getInstance();
 
 // Garbage from transmitter
 boost::lockfree::spsc_queue<std::vector<float>*> Transmitter::garbage(256);
@@ -71,34 +72,10 @@ const unsigned slewTimeMicroseconds_ = 3000000; // 1 second on/off slew
 const unsigned updateDelayMicroseconds_ = 10; // 100 kHz updates
 
 
-/**
- * Memory-map the peripherals addresses
- */
-inline void* mmapPeripherals() {
-  LOG_DEBUG << "Memory mapping peripherals";
-
-  int memFd;
-  if ((memFd = open("/dev/mem", O_RDWR | O_SYNC)) < 0) {
-    throw ErrorReporter("Cannot open /dev/mem (permission denied)");
-  }
-  void* peripheralsBase = mmap(NULL,
-			       PERIPHERALS_LENGTH,
-			       PROT_READ | PROT_WRITE,
-			       MAP_SHARED,
-			       memFd,
-			       PERIPHERALS_BASE);
-  close(memFd);
-  if (peripheralsBase == MAP_FAILED) {
-    throw ErrorReporter("Cannot obtain access to peripherals_ (mmap error)");
-  }
-  return peripheralsBase;
-}
-
-
 Transmitter::Transmitter(AbstractReader* reader) {
   LOG_DEBUG << "Initializing transmitter";
   reader_ = reader;
-  mmapPeripherals_ = mmapPeripherals();
+  mmapPeripherals_ = peripherals::Peripherals::getInstance().getPeripheralsBase();
 }
 
 
@@ -108,7 +85,6 @@ Transmitter::~Transmitter() {
     this->stop();
   }
   reader_->stop(true);
-  munmap((void*)mmapPeripherals_, PERIPHERALS_LENGTH);
 }
 
 
