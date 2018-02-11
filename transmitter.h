@@ -2,6 +2,7 @@
     fm_transmitter - use Raspberry Pi as FM transmitter
 
     Copyright (c) 2015, Marcin Kondej
+    Copyright (c) 2017-2018, Michael McCoy
     All rights reserved.
 
     See https://github.com/markondej/fm_transmitter
@@ -42,7 +43,7 @@
 #include "audio_format.h"
 #include "abstract_reader.h"
 #include "noisegate.h"
-
+#include "peripherals.h"
 #define BUFFER_FRAMES 2048
 
 using std::vector;
@@ -87,6 +88,7 @@ private:
   static float centerFreqMHz_;
   static float spreadMHz_;
   static float currentValue_;
+  static peripherals::Peripherals& peripherals_;
   static void* mmapPeripherals_;
   static unsigned clockOffsetAddr_;
   volatile static bool doStop_;
