@@ -83,7 +83,6 @@
 #define GPPUDCLK1 0x0020009C
 
 
-
 /**
  * CM: General-purpose clock manager
  */
@@ -103,7 +102,7 @@
 #define CM_PWMDIV  0x001010a4
 #define CM_UARTDIV 0x001010f4
 
-// Clock-manger password (required to write to *CTL and *DIV)
+// Clock-manager password (required to write to CM_*CTL and CM_*DIV)
 #define CM_PASSWD 0x5A000000
 
 // Clock MASH filters
@@ -139,6 +138,19 @@
 #define PLLA_FREQ_MHZ 650.0
 #define PLLC_FREQ_MHZ 200.0
 #define PLLD_FREQ_MHZ 500.0
+
+
+/**
+ * PWM: Pulse-width modulation control and status registers
+ */
+#define PWM_CTL  0x0020C000
+#define PWM_STA  0x0020C004
+#define PWM_DMAC 0x0020C008
+#define PWM_RNG1 0x0020C010
+#define PWM_DAT1 0x0020C014
+#define PWM_FIF1 0x0020C018
+#define PWM_RNG2 0x0020C020
+#define PWM_DAT2 0x0020C024
 
 
 /**
@@ -256,8 +268,18 @@ namespace peripherals {
       clockShutdown(cmRegister);
       clockDivisorSet(cmRegister, clockDivisor);
 
-      unsigned clockConfig = CM_PASSWD | (0x00FFFFFF & (mash | CM_ENAB | clockSource));
+      unsigned clockConfig =
+	CM_PASSWD | (0x00FFFFFF & (mash | CM_ENAB | clockSource));
+
       ACCESS(peripheralsBase_, cmRegister) = clockConfig;
+    }
+
+
+    /**
+     */
+    inline unsigned gpioFsel(unsigned fselNum, unsigned fselBits) {
+      unsigned fselBase = GPFSEL0;
+      return 0; // TODO
     }
 
     /**
