@@ -191,7 +191,7 @@ namespace peripherals {
     /**
      * Get the base address of the peripherals
      *
-     * @return: The base address of the peripherals,
+     * @returns The base address of the peripherals,
      *          or NULL if unable to access the peripherals
      */
     void* getPeripheralsBase() {
@@ -199,52 +199,83 @@ namespace peripherals {
     }
 
     /**
-     * Read the microseconds from the SystemTimer register
+     * Read microseconds from the SystemTimer register
      */
     inline unsigned long long systemTimerMicroseconds() {
       return ACCESS64(peripheralsBase_, ST_CLO);
     }
 
     /**
+     * Clock shutdown sequence
      *
+     * @returns The clock manager state after shutdown
      */
-    // TODO: use enum classes to set these
-    inline void clockInit(unsigned cmRegister,
-			  unsigned clockDivisor,
-			  unsigned mash,
-			  unsigned clockSource) {
+    inline unsigned clockShutdown(unsigned cmRegister) {
 
-      unsigned divRegister = cmRegister + 4;
-      
       // Disable clock
       volatile unsigned cmState = ACCESS(peripheralsBase_, cmRegister);
-      ACCESS(peripheralsBase_, cmRegister) = (cmState & !CM_ENAB) | CM_PASSWD;
+      ACCESS(peripheralsBase_, cmRegister) =
+	CM_PASSWD | (0x00FFFFFF & cmState & !CM_ENAB);
 
       // Wait for clock to become available
       do {
 	cmState = ACCESS(peripheralsBase_, cmRegister);
       }	while (cmState & CM_BUSY);
 
-      // Set clock divisor
-      ACCESS(peripheralsBase_, divRegister) = CM_PASSWD | (0x00FFFFFF & clockDivisor);
+      return cmState;
+    }
 
-      // Configure
-      unsigned clockConfig = CM_PASSWD | mash | CM_ENAB | clockSource;
+    /**
+     * Set the clock divisor
+     *
+     * To avoid glitches, call clockShutdown() before calling this method.
+     *
+     * @param clockDivisor A 24-bit clock divisor (12-bit integral part,
+     * 12-bit fractional part).
+     */
+    inline void clockDivisorSet(unsigned cmRegister, unsigned clockDivisor) {
+      unsigned divRegister = cmRegister + 4;
+      ACCESS(peripheralsBase_, divRegister) =
+	CM_PASSWD | (0x00FFFFFF & clockDivisor);
+    }
+
+    /**
+     * Clock initialization sequence
+     *
+     * @param cmRegister The control register for the clock (CM_*CTL)
+     * @param clockDivisor A 24-bit clock divisor (12-bit integral part,
+     *        12-bit fractional part).
+     * @param mash The MASH filter setting (CM_MASH*)
+     * @param clockSource The source of the clock (CM_SRC_*)
+     */
+    inline void clockInit(unsigned cmRegister,
+			  unsigned clockDivisor,
+			  unsigned mash,
+			  unsigned clockSource) {
+
+      clockShutdown(cmRegister);
+      clockDivisorSet(cmRegister, clockDivisor);
+
+      unsigned clockConfig = CM_PASSWD | (0x00FFFFFF & (mash | CM_ENAB | clockSource));
       ACCESS(peripheralsBase_, cmRegister) = clockConfig;
     }
 
     /**
-     * 
+     *
      */
     void pwmInit() {
       // TODO: Lock?
       // TODO: choose one (PWM0, PIN12), (PWM1, PIN13), (PWM0, PIN18), (PWM1, PIN19), (PWM0, PIN40), (PWM1, PIN45)
       // TODO: Choose clock (OSC, PLLA, PLLC, PLLD)
-      // TODO: Choose clock divisor, set mash filter, etc. ? 
+      // TODO: Choose clock divisor, set mash filter, etc. ?
 
-      clockInit(CM_PWMCTL, 1, CM_MASH0, CM_SRC_PLLD);
+      unsigned cmRegister = CM_PWMCTL;
+      unsigned mash = CM_MASH0;
+      unsigned clockSource = CM_SRC_PLLD;
+      unsigned clockDivisor = 1;
 
-      
+      clockInit(cmRegister, clockDivisor, mash, clockSource);
+
       // 2. Choose the pin function
       // (PWM0, PIN12) => GPFSEL1, set bits 8-6 to 0x100 (ALT function zero)
       unsigned fselBase = GPFSEL1;
@@ -256,11 +287,11 @@ namespace peripherals {
 
       ACCESS(peripheralsBase_, fselBase) = goalState;
     }
-    
+
     // Deleting these helps ensure singletons
     Peripherals(Peripherals const&) = delete;
     void operator=(Peripherals const&) = delete;
-    
+
   private:
 
     /**
