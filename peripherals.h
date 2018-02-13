@@ -154,8 +154,8 @@
 #define ST_CHI 0x00003008
 
 
-#define ACCESS(base, offset) *(volatile unsigned*)((int)base + offset)
-#define ACCESS64(base, offset) *(volatile unsigned long long*)((int)base + offset)
+#define ACCESS(base, offset) *(volatile unsigned*)((unsigned)base + offset)
+#define ACCESS64(base, offset) *(volatile unsigned long long*)((unsigned)base + offset)
 
 
 namespace peripherals {
@@ -175,6 +175,8 @@ namespace peripherals {
 
     // Uses singleton pattern
     // https://stackoverflow.com/questions/1008019/c-singleton-design-pattern
+
+    // TODO: Thread-safe access?
 
   public:
 
@@ -203,7 +205,62 @@ namespace peripherals {
       return ACCESS64(peripheralsBase_, ST_CLO);
     }
 
+    /**
+     *
+     */
+    // TODO: use enum classes to set these
+    inline void clockInit(unsigned cmRegister,
+			  unsigned clockDivisor,
+			  unsigned mash,
+			  unsigned clockSource) {
 
+      unsigned divRegister = cmRegister + 4;
+      
+      // Disable clock
+      volatile unsigned cmState = ACCESS(peripheralsBase_, cmRegister);
+      ACCESS(peripheralsBase_, cmRegister) = (cmState & !CM_ENAB) | CM_PASSWD;
+
+      // Wait for clock to become available
+      do {
+	cmState = ACCESS(peripheralsBase_, cmRegister);
+      }	while (cmState & CM_BUSY);
+
+      // Set clock divisor
+      ACCESS(peripheralsBase_, divRegister) = CM_PASSWD | (0x00FFFFFF & clockDivisor);
+
+      // Configure
+      unsigned clockConfig = CM_PASSWD | mash | CM_ENAB | clockSource;
+      ACCESS(peripheralsBase_, cmRegister) = clockConfig;
+    }
+
+    /**
+     * 
+     */
+    void pwmInit() {
+      // TODO: Lock?
+      // TODO: choose one (PWM0, PIN12), (PWM1, PIN13), (PWM0, PIN18), (PWM1, PIN19), (PWM0, PIN40), (PWM1, PIN45)
+      // TODO: Choose clock (OSC, PLLA, PLLC, PLLD)
+      // TODO: Choose clock divisor, set mash filter, etc. ? 
+
+      clockInit(CM_PWMCTL, 1, CM_MASH0, CM_SRC_PLLD);
+
+      
+      // 2. Choose the pin function
+      // (PWM0, PIN12) => GPFSEL1, set bits 8-6 to 0x100 (ALT function zero)
+      unsigned fselBase = GPFSEL1;
+      unsigned fselBits = 0x7 << 5;
+      unsigned fsel = 0x100 << 5;
+
+      unsigned initialState = ACCESS(peripheralsBase_, fselBase);
+      unsigned goalState = (initialState & (!fselBits)) | fsel;
+
+      ACCESS(peripheralsBase_, fselBase) = goalState;
+    }
+    
+    // Deleting these helps ensure singletons
+    Peripherals(Peripherals const&) = delete;
+    void operator=(Peripherals const&) = delete;
+    
   private:
 
     /**
@@ -251,12 +308,6 @@ namespace peripherals {
     }
 
     void* peripheralsBase_;
-
-  public:
-
-    // Ensures singletons
-    Peripherals(Peripherals const&) = delete;
-    void operator=(Peripherals const&) = delete;
 
   };
 
