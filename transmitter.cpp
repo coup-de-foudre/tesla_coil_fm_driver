@@ -189,8 +189,8 @@ unsigned Transmitter::clkInitHard(float freqMHz, bool lock=true) {
   unsigned clkDivisor = clkDivisorSet(freqMHz);
 
   // Set GPIO pin 4 alternate function 1 (GPCLK0)
-  ACCESS(mmapPeripherals_, GPFSEL0) =
-    (ACCESS(mmapPeripherals_, GPFSEL0) & 0xFFFF8FFF) | (0x01 << 14);
+  ACCESS(mmapPeripherals_, (unsigned) GPFSEL_REGISTER::GPFSEL0) =
+    (ACCESS(mmapPeripherals_, (unsigned) GPFSEL_REGISTER::GPFSEL0) & 0xFFFF8FFF) | (0x01 << 14);
 
   // Set up the clock manager
   ACCESS(mmapPeripherals_, CM_GP0CTL) =
