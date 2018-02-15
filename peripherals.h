@@ -10,6 +10,7 @@
 #define BCM2837_PERIPHERALS_H
 
 #include <exception>
+#include <vector>
 
 /**
  *  Base (physical) addresses for peripherals
@@ -228,6 +229,11 @@ enum class PWM_CTL : unsigned {
   PWEN1 = 1 << 0    // Channel 1 enable
 };
 
+enum class PWM_CHANNEL : unsigned {
+  CH1 = 1,
+  CH2 = 2
+};
+  
 /**
  * ST: System timer provides a 64-bit system counter
  */
@@ -241,8 +247,8 @@ enum class PWM_CTL : unsigned {
 #define ST_CHI 0x00003008
 
 
-#define ACCESS(base, offset) *(volatile unsigned*)((unsigned)base + offset)
-#define ACCESS64(base, offset) *(volatile unsigned long long*)((unsigned)base + offset)
+#define ACCESS(base, offset) *(volatile unsigned*)((unsigned)base + (unsigned)offset)
+#define ACCESS64(base, offset) *(volatile unsigned long long*)((unsigned)base + (unsigned)offset)
 
 
 namespace peripherals {
@@ -301,8 +307,7 @@ namespace peripherals {
 
       // Disable clock
       volatile unsigned cmState = ACCESS(peripheralsBase_, cmRegister);
-      ACCESS(peripheralsBase_, cmRegister) =
-	CM_PASSWD | (0x00FFFFFF & cmState & !CM_ENAB);
+      ACCESS(peripheralsBase_, cmRegister) = cmPwd(setBits(cmState, CM_ENAB, !CM_ENAB));
 
       // Wait for clock to become available
       do {
@@ -318,12 +323,11 @@ namespace peripherals {
      * To avoid glitches, call clockShutdown() before calling this method.
      *
      * @param clockDivisor A 24-bit clock divisor (12-bit integral part,
-     * 12-bit fractional part).
+     *        12-bit fractional part).
      */
     inline void clockDivisorSet(unsigned cmRegister, unsigned clockDivisor) {
       unsigned divRegister = cmRegister + 4;
-      ACCESS(peripheralsBase_, divRegister) =
-	CM_PASSWD | (0x00FFFFFF & clockDivisor);
+      ACCESS(peripheralsBase_, divRegister) = cmPwd(clockDivisor);
     }
 
     /**
@@ -343,8 +347,7 @@ namespace peripherals {
       clockShutdown(cmRegister);
       clockDivisorSet(cmRegister, clockDivisor);
 
-      unsigned clockConfig =
-	CM_PASSWD | (0x00FFFFFF & (mash | CM_ENAB | clockSource));
+      unsigned clockConfig = cmPwd(mash | CM_ENAB | clockSource);
 
       ACCESS(peripheralsBase_, cmRegister) = clockConfig;
     }
@@ -366,6 +369,41 @@ namespace peripherals {
       ACCESS(peripheralsBase_, offset) = goalState;
     }
 
+    /**
+     * Set PWM Control
+     *
+     * @param modes The modes to enable. The corresponding bits are set 
+     *        to one in the PWM_CTL register, others are set to zero.
+     *              
+     */
+    inline void pwmCtlSet(std::vector<PWM_CTL> modes) {
+      unsigned offset = (unsigned) PWM_REGISTER::CTL;
+      unsigned setValue = 0;
+      
+      for (PWM_CTL mode : modes) {
+	setValue |= (unsigned) mode;
+      }
+
+      ACCESS(peripheralsBase_, offset) = setValue;
+    }
+
+    /**
+     * Set PWM range
+     */
+    inline void pwmRangeSet(PWM_CHANNEL channel, unsigned range) {
+      PWM_REGISTER offset = (channel == PWM_CHANNEL::CH1) ?
+	PWM_REGISTER::RNG1 : PWM_REGISTER::RNG2;
+      ACCESS(peripheralsBase_, offset) = range;
+    }
+
+    /**
+     * Set PWM data
+     */
+    inline void pwmDataSet(PWM_CHANNEL channel, unsigned data) {
+      PWM_REGISTER offset = (channel == PWM_CHANNEL::CH1) ?
+	PWM_REGISTER::DAT1 : PWM_REGISTER::DAT2;
+      ACCESS(peripheralsBase_, offset) = data;
+    }
 
     /**
      *
@@ -378,12 +416,25 @@ namespace peripherals {
 
       unsigned cmRegister = CM_PWMCTL;
       unsigned mash = CM_MASH0;
+
+      // Set the duty cycle to 50% at 100MHz
       unsigned clockSource = CM_SRC_PLLD;
       unsigned clockDivisor = 1;
+      unsigned pwmPeriod = 500; // This is the period S
+      unsigned pwmDutyCycle = 250; // This is duty M
+      
+      std::vector<PWM_CTL> pwmModes = {
+	PWM_CTL::MSEN1,  // Enable M/S transmittion
+	PWM_CTL::PWEN1   // Enable channel 1 (which maps to PWM0?)
+      };
 
-      clockInit(cmRegister, clockDivisor, mash, clockSource);
+      clockInit(cmRegister, clockDivisor, mash, clockSource); // TODO: enum class
       gpioFunctionSelect(FSEL::FSEL12, FSEL_MODE::ALT0);
+      pwmCtlSet(pwmModes);
+      pwmRangeSet(PWM_CHANNEL::CH1, pwmPeriod);
+      pwmDataSet(PWM_CHANNEL::CH1, pwmDutyCycle);
 
+      //TODO: usleep 1e6, then turn off GPIO and quit
     }
 
     // Deleting these helps ensure singletons
@@ -436,6 +487,24 @@ namespace peripherals {
       return mappedBase;
     }
 
+    /**
+     * Set bits to given value 
+     *
+     * @param word The value to modify
+     * @param bits The bit values
+     * @param mask Change the bits set to 1
+     */
+    static inline unsigned setBits(unsigned word, unsigned bits, unsigned mask) {
+      return (word & !mask) | bits;
+    }
+
+    /**
+     * Add clock manager password to word
+     */
+    static inline unsigned cmPwd(unsigned word) {
+      return setBits(word, CM_PASSWD, 0xFF000000);
+    }
+    
     void* peripheralsBase_;
 
   };
