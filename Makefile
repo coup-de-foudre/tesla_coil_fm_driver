@@ -32,6 +32,9 @@ transmitter.o: transmitter.cpp transmitter.h peripherals.h
 main.o: main.cpp
 	$(CPP) $(CFLAGS) -c main.cpp
 
+pwmtest.o: pwm.cpp
+	$(CPP) $(CFLAGS) -c pwmtest.cpp
+
 .PHONY: install
 install: fm_transmitter
 	sudo cp fm_transmitter /usr/local/bin/fm_transmitter && sync

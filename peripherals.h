@@ -9,6 +9,9 @@
 #ifndef BCM2837_PERIPHERALS_H
 #define BCM2837_PERIPHERALS_H
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #include <exception>
 #include <vector>
 
@@ -29,17 +32,66 @@
  * GPIO Function Select Registers
  */
 
-// Function select registers
-enum class GPFSEL_REGISTER : unsigned {
+enum class GP_REGISTER : unsigned {
+  // Function select registers
   GPFSEL0 = 0x00200000,
   GPFSEL1 = 0x00200004,
   GPFSEL2 = 0x00200008,
   GPFSEL3 = 0x0020000C,
   GPFSEL4 = 0x00200010,
-  GPFSEL5 = 0x00200014
+  GPFSEL5 = 0x00200014,
+
+  // Pin set
+  GPSET0 = 0x0020001C,
+  GPSET1 = 0x00200020,
+
+  // Pin clear
+  GPCLR0 = 0x00200028,
+  GPCLR1 = 0x0020002C,
+
+  // Pin level
+  GPLVL0 = 0x00200034,
+  GPLVL1 = 0x00200038,
+
+  // Pin event detect status
+  GPEDS0 = 0x00200040,
+  GPEDS1 = 0x00200044,
+
+  // Pin rising edge detect enable
+  GPREN0 = 0x0020004C,
+  GPREN1 = 0x00200050,
+
+  // Pin falling edge detect enable
+  GPFEN0 = 0x00200058,
+  GPFEN1 = 0x0020005C,
+
+  // Pin high detect enable
+  GPHEN0 = 0x00200064,
+  GPHEN1 = 0x00200068,
+
+  // Pin low detect enable
+  GPLEN0 = 0x00200070,
+  GPLEN1 = 0x00200074,
+
+  // Pin async rising edge detect enable
+  GPAREN0 = 0x0020007C,
+  GPAREN1 = 0x00200080,
+
+  // Pin async falling edge detect enable
+  GPAFEN0 = 0x00200088,
+  GPAFEN1 = 0x0020008C,
+
+  // Pin pull-up/down enable
+  GPPUD = 0x00200094,
+
+  // Pin pull-up/down enable clock
+  GPPUDCLK0 = 0x00200098,
+  GPPUDCLK1 = 0x0020009C
 };
 
-//
+/**
+ * Function select options
+ */
 enum class FSEL : unsigned {
   FSEL00, FSEL01, FSEL02, FSEL03, FSEL04, FSEL05, FSEL06, FSEL07, FSEL08, FSEL09,
   FSEL10, FSEL11, FSEL12, FSEL13, FSEL14, FSEL15, FSEL16, FSEL17, FSEL18, FSEL19,
@@ -49,6 +101,9 @@ enum class FSEL : unsigned {
   FSEL50, FSEL51, FSEL52, FSEL53
 };
 
+/**
+ * Function select modes
+ */
 enum class FSEL_MODE : unsigned {
   INPUT = 0x000,
   OUTPUT = 0x001,
@@ -61,103 +116,63 @@ enum class FSEL_MODE : unsigned {
   MASK = 0x111
 };
 
-// Pin set
-#define GPSET0 0x0020001C
-#define GPSET1 0x00200020
-
-// Pin clear
-#define GPCLR0 0x00200028
-#define GPCLR1 0x0020002C
-
-// Pin level
-#define GPLVL0 0x00200034
-#define GPLVL1 0x00200038
-
-// Pin event detect status
-#define GPEDS0 0x00200040
-#define GPEDS1 0x00200044
-
-// Pin rising edge detect enable
-#define GPREN0 0x0020004C
-#define GPREN1 0x00200050
-
-// Pin falling edge detect enable
-#define GPFEN0 0x00200058
-#define GPFEN1 0x0020005C
-
-// Pin high detect enable
-#define GPHEN0 0x00200064
-#define GPHEN1 0x00200068
-
-// Pin low detect enable
-#define GPLEN0 0x00200070
-#define GPLEN1 0x00200074
-
-// Pin async rising edge detect enable
-#define GPAREN0 0x0020007C
-#define GPAREN1 0x00200080
-
-// Pin async falling edge detect enable
-#define GPAFEN0 0x00200088
-#define GPAFEN1 0x0020008C
-
-// Pin pull-up/down enable
-#define GPPUD 0x00200094
-
-// Pin pull-up/down enable clock
-#define GPPUDCLK0 0x00200098
-#define GPPUDCLK1 0x0020009C
-
-
 /**
  * CM: General-purpose clock manager
  */
-// Control registers
-#define CM_GP0CTL  0x00101070
-#define CM_GP1CTL  0x00101078
-#define CM_GP2CTL  0x00101080
-#define CM_PCMCTL  0x00101098
-#define CM_PWMCTL  0x001010a0
-#define CM_UARTCTL 0x001010f0
+enum class CM_CTL : unsigned {
+  GP0CTL  = 0x00101070,
+  GP1CTL  = 0x00101078,
+  GP2CTL  = 0x00101080,
+  PCMCTL  = 0x00101098,
+  PWMCTL  = 0x001010a0,
+  UARTCTL = 0x001010f0
+};
 
-// Clock divisor registers
-#define CM_GP0DIV  0x00101074
-#define CM_GP1DIV  0x0010107c
-#define CM_GP2DIV  0x00101084
-#define CM_PCMDIV  0x0010109c
-#define CM_PWMDIV  0x001010a4
-#define CM_UARTDIV 0x001010f4
+enum class CM_DIV : unsigned {
+  GP0DIV  = 0x00101074,
+  GP1DIV  = 0x0010107c,
+  GP2DIV  = 0x00101084,
+  PCMDIV  = 0x0010109c,
+  PWMDIV  = 0x001010a4,
+  UARTDIV = 0x001010f4
+};
 
-// Clock-manager password (required to write to CM_*CTL and CM_*DIV)
-#define CM_PASSWD 0x5A000000
+enum class CM_MODE : unsigned {
+  // Clock-manager password (required to write to CM_*CTL and CM_*DIV)
+  PASSWD = 0x5A000000,
 
-// Clock MASH filters
-#define CM_MASH0 (0x00 << 9)
-#define CM_MASH1 (0x01 << 9)
-#define CM_MASH2 (0x02 << 9)
-#define CM_MASH3 (0x03 << 9)
+  // Clock output flip (test/debug only)
+  FLIP = (0x01 << 8),
 
-// Clock output flip (test/debug only)
-#define CM_FLIP (0x01 << 8)
+  // Clock manager busy
+  BUSY = (0x01 << 7),
 
-// Clock manageer busy
-#define CM_BUSY (0x01 << 7)
+  // Clock generator kill (test/debug only)
+  KILL = (0x01 << 5),
 
-// Clock generator kill (test/debug only)
-#define CM_KILL (0x01 << 5)
+  // Clock manager enable
+  ENAB = (0x01 << 4),
+};
 
-// Clock manager enable
-#define CM_ENAB (0x01 << 4)
+enum class CM_MASH : unsigned {
+  // Clock MASH filters
+  MASH0 = (0x00 << 9),
+  MASH1 = (0x01 << 9),
+  MASH2 = (0x02 << 9),
+  MASH3 = (0x03 << 9)
+};
 
-// Clock manager clock set
-#define CM_SRC_GND (0x00)
-#define CM_SRC_OSC (0x01)
-#define CM_SRC_TST0 (0x02)  // test/debug only
-#define CM_SRC_TST1 (0x01)  // test/debug only
-#define CM_SRC_PLLA (0x04)
-#define CM_SRC_PLLC (0x05)
-#define CM_SRC_PLLD (0x06)
-#define CM_SRC_HDMI (0x07)
+enum class CM_SRC : unsigned {
+  // Clock manager clock set
+  GND = (0x00),
+  OSC = (0x01),
+  TST0 = (0x02),  // test/debug only
+  TST1 = (0x01),  // test/debug only
+  PLLA = (0x04),
+  PLLC = (0x05),
+  PLLD = (0x06),
+  HDMI =(0x07)
+};
 
 // Clock frequencies
 #define OSC_FREQ_MHZ  19.2
@@ -170,8 +185,8 @@ enum class FSEL_MODE : unsigned {
  * PWM: Pulse-width modulation control and status registers
  */
 enum class PWM_REGISTER : unsigned {
-  CTL =  0x0020C000,  // Control
-  STA =  0x0020C004,  // Status
+  CTL  = 0x0020C000,  // Control
+  STA  = 0x0020C004,  // Status
   DMAC = 0x0020C008,  // DMA configuration
   RNG1 = 0x0020C010,  // Channel 1 range
   DAT1 = 0x0020C014,  // Channel 1 data
@@ -237,15 +252,16 @@ enum class PWM_CHANNEL : unsigned {
 /**
  * ST: System timer provides a 64-bit system counter
  */
-// System Timer Control/Status
-#define ST_CS 0x00003000
+enum class ST_REGISTER : unsigned {
+  // System Timer Control/Status
+  CS = 0x00003000,
 
-// Least-significant 32 bits
-#define ST_CLO 0x00003004
+  // Least-significant 32 bits
+  CLO = 0x00003004,
 
-// Most-significant 32 bits
-#define ST_CHI 0x00003008
-
+  // Most-significant 32 bits
+  CHI = 0x00003008
+};
 
 #define ACCESS(base, offset) *(volatile unsigned*)((unsigned)base + (unsigned)offset)
 #define ACCESS64(base, offset) *(volatile unsigned long long*)((unsigned)base + (unsigned)offset)
@@ -295,7 +311,7 @@ namespace peripherals {
      * Read microseconds from the SystemTimer register
      */
     inline unsigned long long systemTimerMicroseconds() {
-      return ACCESS64(peripheralsBase_, ST_CLO);
+      return ACCESS64(peripheralsBase_, ST_REGISTER::CLO);
     }
 
     /**
@@ -303,16 +319,17 @@ namespace peripherals {
      *
      * @returns The clock manager state after shutdown
      */
-    inline unsigned clockShutdown(unsigned cmRegister) {
+    inline unsigned clockShutdown(CM_CTL ctlRegister) {
 
       // Disable clock
-      volatile unsigned cmState = ACCESS(peripheralsBase_, cmRegister);
-      ACCESS(peripheralsBase_, cmRegister) = cmPwd(setBits(cmState, CM_ENAB, !CM_ENAB));
+      volatile unsigned cmState = ACCESS(peripheralsBase_, ctlRegister);
+      ACCESS(peripheralsBase_, ctlRegister) =
+	cmPwd(setBits(cmState, (unsigned)CM_MODE::ENAB, !(unsigned)CM_MODE::ENAB));
 
       // Wait for clock to become available
       do {
-	cmState = ACCESS(peripheralsBase_, cmRegister);
-      }	while (cmState & CM_BUSY);
+	cmState = ACCESS(peripheralsBase_, ctlRegister);
+      }	while (cmState & (unsigned)CM_MODE::BUSY);
 
       return cmState;
     }
@@ -322,11 +339,11 @@ namespace peripherals {
      *
      * To avoid glitches, call clockShutdown() before calling this method.
      *
+     * @param divRegister The clock divisor register
      * @param clockDivisor A 24-bit clock divisor (12-bit integral part,
      *        12-bit fractional part).
      */
-    inline void clockDivisorSet(unsigned cmRegister, unsigned clockDivisor) {
-      unsigned divRegister = cmRegister + 4;
+    inline void clockDivisorSet(CM_DIV divRegister, unsigned clockDivisor) {
       ACCESS(peripheralsBase_, divRegister) = cmPwd(clockDivisor);
     }
 
@@ -339,17 +356,18 @@ namespace peripherals {
      * @param mash The MASH filter setting (CM_MASH*)
      * @param clockSource The source of the clock (CM_SRC_*)
      */
-    inline void clockInit(unsigned cmRegister,
+    inline void clockInit(CM_CTL ctlRegister,
 			  unsigned clockDivisor,
-			  unsigned mash,
-			  unsigned clockSource) {
+			  CM_MASH mash,
+			  CM_SRC clockSource) {
+      CM_DIV divRegister = (CM_DIV)((unsigned) ctlRegister + 4);
+      clockShutdown(ctlRegister);
+      clockDivisorSet(divRegister, clockDivisor);
 
-      clockShutdown(cmRegister);
-      clockDivisorSet(cmRegister, clockDivisor);
+      unsigned clockConfig =
+	cmPwd((unsigned)mash | (unsigned)CM_MODE::ENAB | (unsigned)clockSource);
 
-      unsigned clockConfig = cmPwd(mash | CM_ENAB | clockSource);
-
-      ACCESS(peripheralsBase_, cmRegister) = clockConfig;
+      ACCESS(peripheralsBase_, ctlRegister) = clockConfig;
     }
 
 
@@ -359,7 +377,7 @@ namespace peripherals {
     inline void gpioFunctionSelect(FSEL fsel, FSEL_MODE mode) {
 
       unsigned offset =
-	(unsigned) GPFSEL_REGISTER::GPFSEL0 + 4 * ((unsigned) fsel / 10);
+	(unsigned) GP_REGISTER::GPFSEL0 + 4 * ((unsigned) fsel / 10);
       unsigned shift = 3 * ((unsigned) fsel % 10);
 
       unsigned initialState = ACCESS(peripheralsBase_, offset);
@@ -405,37 +423,6 @@ namespace peripherals {
       ACCESS(peripheralsBase_, offset) = data;
     }
 
-    /**
-     *
-     */
-    void pwmInit() {
-      // TODO: Lock?
-      // TODO: choose one (PWM0, PIN12), (PWM1, PIN13), (PWM0, PIN18), (PWM1, PIN19), (PWM0, PIN40), (PWM1, PIN45)
-      // TODO: Choose clock (OSC, PLLA, PLLC, PLLD)
-      // TODO: Choose clock divisor, set mash filter, etc. ?
-
-      unsigned cmRegister = CM_PWMCTL;
-      unsigned mash = CM_MASH0;
-
-      // Set the duty cycle to 50% at 100MHz
-      unsigned clockSource = CM_SRC_PLLD;
-      unsigned clockDivisor = 1;
-      unsigned pwmPeriod = 500; // This is the period S
-      unsigned pwmDutyCycle = 250; // This is duty M
-      
-      std::vector<PWM_CTL> pwmModes = {
-	PWM_CTL::MSEN1,  // Enable M/S transmittion
-	PWM_CTL::PWEN1   // Enable channel 1 (which maps to PWM0?)
-      };
-
-      clockInit(cmRegister, clockDivisor, mash, clockSource); // TODO: enum class
-      gpioFunctionSelect(FSEL::FSEL12, FSEL_MODE::ALT0);
-      pwmCtlSet(pwmModes);
-      pwmRangeSet(PWM_CHANNEL::CH1, pwmPeriod);
-      pwmDataSet(PWM_CHANNEL::CH1, pwmDutyCycle);
-
-      //TODO: usleep 1e6, then turn off GPIO and quit
-    }
 
     // Deleting these helps ensure singletons
     Peripherals(Peripherals const&) = delete;
@@ -502,7 +489,7 @@ namespace peripherals {
      * Add clock manager password to word
      */
     static inline unsigned cmPwd(unsigned word) {
-      return setBits(word, CM_PASSWD, 0xFF000000);
+      return setBits(word, (unsigned)CM_MODE::PASSWD, 0xFF000000);
     }
     
     void* peripheralsBase_;
