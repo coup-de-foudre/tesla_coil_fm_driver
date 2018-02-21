@@ -32,8 +32,8 @@ transmitter.o: transmitter.cpp transmitter.h peripherals.h
 main.o: main.cpp
 	$(CPP) $(CFLAGS) -c main.cpp
 
-pwmtest.o: pwm.cpp
-	$(CPP) $(CFLAGS) -c pwmtest.cpp
+pwmtest: pwmtest.cpp *.h
+	$(CPP) $(CFLAGS) -o pwmtest pwmtest.cpp
 
 .PHONY: install
 install: fm_transmitter

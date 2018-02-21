@@ -175,10 +175,12 @@ enum class CM_SRC : unsigned {
 };
 
 // Clock frequencies
-#define OSC_FREQ_MHZ  19.2
-#define PLLA_FREQ_MHZ 650.0
-#define PLLC_FREQ_MHZ 200.0
-#define PLLD_FREQ_MHZ 500.0
+namespace CM_FREQ {
+  constexpr float OSC_MHZ  = 19.2;
+  constexpr float PLLA_MHZ = 650.0;
+  constexpr float PLLC_MHZ = 200.0;
+  constexpr float PLLD_MHZ = 500.0;
+};
 
 
 /**
@@ -248,7 +250,7 @@ enum class PWM_CHANNEL : unsigned {
   CH1 = 1,
   CH2 = 2
 };
-  
+
 /**
  * ST: System timer provides a 64-bit system counter
  */
@@ -268,6 +270,14 @@ enum class ST_REGISTER : unsigned {
 
 
 namespace peripherals {
+
+  /**
+   * Clock divisor (12-bit integral, 12-bit fractional part)
+   */
+  struct CLOCK_DIV {
+    unsigned divI : 12;
+    unsigned divF : 12;
+  };
 
   struct MemoryMapPeripheralsException : public std::exception {
 
@@ -343,7 +353,8 @@ namespace peripherals {
      * @param clockDivisor A 24-bit clock divisor (12-bit integral part,
      *        12-bit fractional part).
      */
-    inline void clockDivisorSet(CM_DIV divRegister, unsigned clockDivisor) {
+    inline void clockDivisorSet(CM_DIV divRegister, CLOCK_DIV clockDiv) {
+      unsigned clockDivisor = (clockDiv.divI << 12) | clockDiv.divF;
       ACCESS(peripheralsBase_, divRegister) = cmPwd(clockDivisor);
     }
 
@@ -351,18 +362,17 @@ namespace peripherals {
      * Clock initialization sequence
      *
      * @param cmRegister The control register for the clock (CM_*CTL)
-     * @param clockDivisor A 24-bit clock divisor (12-bit integral part,
-     *        12-bit fractional part).
+     * @param clockDivisor Clock divisor (12-bit integral part, 12-bit fractional)
      * @param mash The MASH filter setting (CM_MASH*)
      * @param clockSource The source of the clock (CM_SRC_*)
      */
     inline void clockInit(CM_CTL ctlRegister,
-			  unsigned clockDivisor,
+			  CLOCK_DIV clockDiv,
 			  CM_MASH mash,
 			  CM_SRC clockSource) {
       CM_DIV divRegister = (CM_DIV)((unsigned) ctlRegister + 4);
       clockShutdown(ctlRegister);
-      clockDivisorSet(divRegister, clockDivisor);
+      clockDivisorSet(divRegister, clockDiv);
 
       unsigned clockConfig =
 	cmPwd((unsigned)mash | (unsigned)CM_MODE::ENAB | (unsigned)clockSource);
@@ -390,14 +400,14 @@ namespace peripherals {
     /**
      * Set PWM Control
      *
-     * @param modes The modes to enable. The corresponding bits are set 
+     * @param modes The modes to enable. The corresponding bits are set
      *        to one in the PWM_CTL register, others are set to zero.
-     *              
+     *
      */
     inline void pwmCtlSet(std::vector<PWM_CTL> modes) {
       unsigned offset = (unsigned) PWM_REGISTER::CTL;
       unsigned setValue = 0;
-      
+
       for (PWM_CTL mode : modes) {
 	setValue |= (unsigned) mode;
       }
@@ -475,7 +485,7 @@ namespace peripherals {
     }
 
     /**
-     * Set bits to given value 
+     * Set bits to given value
      *
      * @param word The value to modify
      * @param bits The bit values
@@ -491,7 +501,7 @@ namespace peripherals {
     static inline unsigned cmPwd(unsigned word) {
       return setBits(word, (unsigned)CM_MODE::PASSWD, 0xFF000000);
     }
-    
+
     void* peripheralsBase_;
 
   };

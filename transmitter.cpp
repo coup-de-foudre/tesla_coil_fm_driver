@@ -248,7 +248,7 @@ unsigned Transmitter::clkInitSoft() {
  * Returns the new clock divisor.
  */
 inline unsigned Transmitter::clkDivisorSet(float targetFreqMHz) {
-  const float divisor = PLLD_FREQ_MHZ / targetFreqMHz;
+  const float divisor = CM_FREQ::PLLD_MHZ / targetFreqMHz;
   unsigned clockDivisor;
   if (divisor <= 0.0) {
     clockDivisor = 1;
@@ -269,7 +269,7 @@ inline unsigned Transmitter::clkDivisorSet(float targetFreqMHz) {
 inline float Transmitter::getCurrentTransmitFrequencyMHz() {
   volatile unsigned clockDivisor = 0x00FFFFFF & ACCESS(mmapPeripherals_, CM_DIV::GP0DIV);
   float divisor = ((float) clockDivisor) / 4096.0;
-  return PLLD_FREQ_MHZ / divisor;
+  return CM_FREQ::PLLD_MHZ / divisor;
 }
 
 /**
