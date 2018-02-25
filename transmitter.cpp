@@ -56,7 +56,7 @@ volatile bool Transmitter::doStop_ = false;
 
 std::mutex Transmitter::transmitMutex_;
 
-unsigned Transmitter::clockOffsetAddr_ = (unsigned)CM_CTL::GP0CTL;
+unsigned Transmitter::clockOffsetAddr_ = (unsigned)CM_CTL::GP0;
 AbstractReader* Transmitter::reader_ = NULL;
 
 peripherals::Peripherals& Transmitter::peripherals_ = peripherals::Peripherals::getInstance();
@@ -194,7 +194,7 @@ unsigned Transmitter::clkInitHard(float freqMHz, bool lock=true) {
     (ACCESS(mmapPeripherals_, (unsigned) GP_REGISTER::GPFSEL0) & 0xFFFF8FFF) | (0x01 << 14);
 
   // Set up the clock manager
-  ACCESS(mmapPeripherals_, CM_CTL::GP0CTL) =
+  ACCESS(mmapPeripherals_, CM_CTL::GP0) =
     (unsigned)CM_MODE::PASSWD | (unsigned)CM_MASH::MASH1 |
     (unsigned)CM_MODE::ENAB | (unsigned)CM_SRC::PLLD;
 

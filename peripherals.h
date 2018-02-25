@@ -15,6 +15,10 @@
 #include <exception>
 #include <vector>
 
+#include <plog/Log.h>
+#define HEX_STREAM(X) "0x" << std::setfill('0') << std::setw(8) << std::hex << (unsigned)X
+
+
 /**
  *  Base (physical) addresses for peripherals
  */
@@ -120,12 +124,12 @@ enum class FSEL_MODE : unsigned {
  * CM: General-purpose clock manager
  */
 enum class CM_CTL : unsigned {
-  GP0CTL  = 0x00101070,
-  GP1CTL  = 0x00101078,
-  GP2CTL  = 0x00101080,
-  PCMCTL  = 0x00101098,
-  PWMCTL  = 0x001010a0,
-  UARTCTL = 0x001010f0
+  GP0  = 0x00101070,
+  GP1  = 0x00101078,
+  GP2  = 0x00101080,
+  PCM  = 0x00101098,
+  PWM  = 0x001010a0,
+  UART = 0x001010f0
 };
 
 enum class CM_DIV : unsigned {
@@ -164,14 +168,14 @@ enum class CM_MASH : unsigned {
 
 enum class CM_SRC : unsigned {
   // Clock manager clock set
-  GND = (0x00),
-  OSC = (0x01),
+  GND  = (0x00),
+  OSC  = (0x01),
   TST0 = (0x02),  // test/debug only
   TST1 = (0x01),  // test/debug only
   PLLA = (0x04),
   PLLC = (0x05),
   PLLD = (0x06),
-  HDMI =(0x07)
+  HDMI = (0x07)
 };
 
 // Clock frequencies
@@ -334,7 +338,7 @@ namespace peripherals {
       // Disable clock
       volatile unsigned cmState = ACCESS(peripheralsBase_, ctlRegister);
       ACCESS(peripheralsBase_, ctlRegister) =
-	cmPwd(setBits(cmState, (unsigned)CM_MODE::ENAB, !(unsigned)CM_MODE::ENAB));
+	cmPwd(setBits(cmState, ~(unsigned)CM_MODE::ENAB, (unsigned)CM_MODE::ENAB));
 
       // Wait for clock to become available
       do {
@@ -376,7 +380,8 @@ namespace peripherals {
 
       unsigned clockConfig =
 	cmPwd((unsigned)mash | (unsigned)CM_MODE::ENAB | (unsigned)clockSource);
-
+      LOG_DEBUG << "should be : " << HEX_STREAM(((unsigned)mash | (unsigned)CM_MODE::ENAB | (unsigned)clockSource));
+      LOG_DEBUG << "clockConfig: " << HEX_STREAM(clockConfig);
       ACCESS(peripheralsBase_, ctlRegister) = clockConfig;
     }
 
@@ -392,7 +397,7 @@ namespace peripherals {
 
       unsigned initialState = ACCESS(peripheralsBase_, offset);
       unsigned goalState =
-	((unsigned) mode << shift) | (initialState & !(unsigned) FSEL_MODE::MASK);
+	setBits(initialState, (unsigned) mode << shift, (unsigned) FSEL_MODE::MASK);
 
       ACCESS(peripheralsBase_, offset) = goalState;
     }
@@ -488,11 +493,11 @@ namespace peripherals {
      * Set bits to given value
      *
      * @param word The value to modify
-     * @param bits The bit values
-     * @param mask Change the bits set to 1
+     * @param bits The values to set
+     * @param mask Bits to change
      */
     static inline unsigned setBits(unsigned word, unsigned bits, unsigned mask) {
-      return (word & !mask) | bits;
+      return (word & ~mask) | (bits & mask);
     }
 
     /**

@@ -6,14 +6,15 @@
 #include <plog/Appenders/ColorConsoleAppender.h>
 #include "peripherals.h"
 
-#define HEX_STREAM(X) "0x" << std::setfill('0') << std::setw(8) << std::hex << (unsigned)X
-
 
 using namespace peripherals;
 
+void setAllPwm(FSEL_MODE fselMode) {
+}
+
 void pwmTest(Peripherals& p) {
 
-  CM_CTL cmRegister = CM_CTL::PWMCTL;
+  CM_CTL cmRegister = CM_CTL::PWM;
   CM_MASH mash = CM_MASH::MASH0;
 
   // Set the duty cycle to 50% at 100.2MHz
@@ -35,6 +36,7 @@ void pwmTest(Peripherals& p) {
   };
 
   LOG_INFO << "Setting up PWM with parameters";
+  LOG_INFO << "cmRegister: " <<  HEX_STREAM(cmRegister);
   LOG_INFO << "clockSource: " << HEX_STREAM(clockSource);
   LOG_INFO << "mash: " << HEX_STREAM(mash);
   LOG_INFO << "clockDivisor: " << clockDivisor.divI << "(I) " << clockDivisor.divF << "(F)";
@@ -42,8 +44,12 @@ void pwmTest(Peripherals& p) {
   LOG_INFO << "pwmDutyCycle: " << pwmDutyCycle;
   LOG_INFO << "Freq (MHz): " << outputFreqMHz;
 
+  p.clockInit(cmRegister, clockDivisor, mash, clockSource);
   p.gpioFunctionSelect(FSEL::FSEL12, FSEL_MODE::ALT0);
-  p.clockInit(cmRegister, clockDivisor, mash, clockSource); // TODO: enum class
+  //p.gpioFunctionSelect(FSEL::FSEL13, FSEL_MODE::ALT0);
+  //p.gpioFunctionSelect(FSEL::FSEL18, FSEL_MODE::ALT5);
+  //p.gpioFunctionSelect(FSEL::FSEL19, FSEL_MODE::ALT5);
+
   p.pwmCtlSet(pwmModes);
   p.pwmRangeSet(PWM_CHANNEL::CH1, pwmPeriod);
   p.pwmDataSet(PWM_CHANNEL::CH1, pwmDutyCycle);
@@ -53,7 +59,8 @@ void pwmTest(Peripherals& p) {
   sleep(3);
 
   LOG_DEBUG << "Shutting down";
-  p.gpioFunctionSelect(FSEL::FSEL12, FSEL_MODE::INPUT);
+  p.clockShutdown(cmRegister);
+  LOG_DEBUG << "Finished";
 }
 
 int main(int argc, char** argv) {
@@ -62,7 +69,7 @@ int main(int argc, char** argv) {
   // PLog documentation at https://github.com/SergiusTheBest/plog
   static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
   plog::init(plog::debug, &consoleAppender);
-
+  
   LOG_DEBUG << "Starting test";
   pwmTest(peripherals);
   LOG_DEBUG << "Test finished";
