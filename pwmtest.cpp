@@ -5,62 +5,51 @@
 #include <plog/Log.h>
 #include <plog/Appenders/ColorConsoleAppender.h>
 #include "peripherals.h"
-
+#include <iostream>
+#include <cmath>
+#include <ncurses.h>
 
 using namespace peripherals;
 
-void setAllPwm(FSEL_MODE fselMode) {
+
+double max(double a, double b) {
+  return a > b ? a : b;
 }
 
-void pwmTest(Peripherals& p) {
+double min(double a, double b) {
+  return a < b ? a : b;
+}
 
-  CM_CTL cmRegister = CM_CTL::PWM;
-  CM_MASH mash = CM_MASH::MASH0;
 
-  // Set the duty cycle to 50% at 100.2MHz
-  CM_SRC clockSource = CM_SRC::PLLD;
-  float clockFreqMHz = CM_FREQ::PLLD_MHZ;
-  CLOCK_DIV clockDivisor;
-  clockDivisor.divI = 3;
-  clockDivisor.divF = 0;
-  unsigned pwmPeriod = 2; // This is the period S
-  unsigned pwmDutyCycle = 1; // This is duty M
+/**
+ * Frequency tick for a given frequency
+ */
+double freqTick(double freqMHz) {
+  return pow(10.0, int(log10(freqMHz)) - 2.0);
+}
 
-  float outputFreqMHz = clockFreqMHz / (clockDivisor.divI + clockDivisor.divF/(4096.0)) / pwmPeriod;
 
-  std::vector<PWM_CTL> pwmModes = {
-    PWM_CTL::MSEN1,  // Enable M/S transmittion
-    PWM_CTL::PWEN1,  // Enable channel 1 (which maps to PWM0?)
-    PWM_CTL::MSEN2,  // Enable M/S transmittion
-    PWM_CTL::PWEN2,   // Enable channel 2 (which maps to PWM1?)
-  };
+/**
+ * Duty cycle tick
+ */
+double dutyTick(double dutyCycle) {
+  return 0.01;
+}
 
-  LOG_INFO << "Setting up PWM with parameters";
-  LOG_INFO << "cmRegister: " <<  HEX_STREAM(cmRegister);
-  LOG_INFO << "clockSource: " << HEX_STREAM(clockSource);
-  LOG_INFO << "mash: " << HEX_STREAM(mash);
-  LOG_INFO << "clockDivisor: " << clockDivisor.divI << "(I) " << clockDivisor.divF << "(F)";
-  LOG_INFO << "pwmPeriod: " << pwmPeriod;
-  LOG_INFO << "pwmDutyCycle: " << pwmDutyCycle;
-  LOG_INFO << "Freq (MHz): " << outputFreqMHz;
 
-  p.clockInit(cmRegister, clockDivisor, mash, clockSource);
-  p.gpioFunctionSelect(FSEL::FSEL12, FSEL_MODE::ALT0);
-  //p.gpioFunctionSelect(FSEL::FSEL13, FSEL_MODE::ALT0);
-  //p.gpioFunctionSelect(FSEL::FSEL18, FSEL_MODE::ALT5);
-  //p.gpioFunctionSelect(FSEL::FSEL19, FSEL_MODE::ALT5);
+/**
+ * Significant figures needed for frequency
+ */
+int sigFig(double freqMHz) {
+  return round(max(4.0 - log10(freqMHz), 0.));
+}
 
-  p.pwmCtlSet(pwmModes);
-  p.pwmRangeSet(PWM_CHANNEL::CH1, pwmPeriod);
-  p.pwmDataSet(PWM_CHANNEL::CH1, pwmDutyCycle);
 
-  //TODO: usleep 1e6, then turn off GPIO and quit
-  LOG_DEBUG << "Running for 3 seconds";
-  sleep(3);
-
-  LOG_DEBUG << "Shutting down";
-  p.clockShutdown(cmRegister);
-  LOG_DEBUG << "Finished";
+void clearLine(int offset = 0) {
+    int x,y;
+    getyx(stdscr, y, x);
+    move(y + offset,0);
+    clrtoeol();
 }
 
 int main(int argc, char** argv) {
@@ -69,8 +58,56 @@ int main(int argc, char** argv) {
   // PLog documentation at https://github.com/SergiusTheBest/plog
   static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
   plog::init(plog::debug, &consoleAppender);
-  
+
+  /*
+  // TODO:
+  // Add options for setting frequency, pin (12,13,18,19), and duty cycle
+  // Allow arrow keys to update frequency, duty cycle
   LOG_DEBUG << "Starting test";
   pwmTest(peripherals);
   LOG_DEBUG << "Test finished";
+  */
+
+  double freqMHz = 100.0;
+  double dutyCycle = 0.5;
+
+  constexpr char EXIT_CHAR = 'x';
+  static const char help[] =
+    "Use left/right to change frequency, up/down to change duty cycle, 'x' to quit.\n";
+
+  int ch = int(EXIT_CHAR);
+
+  setlocale(LC_ALL, "");
+
+  initscr();/* Start curses mode */
+  raw();/* Line buffering disabled*/
+  keypad(stdscr, TRUE);/* Get arrows, shifts, etc..*/
+  noecho();/* Don't echo() while we do getch */
+
+  printw(help);
+
+  do {
+    clearLine();
+    printw("%%%.1f duty @ %.*fMHz", 100.0*dutyCycle, sigFig(freqMHz), freqMHz);
+    ch = getch();
+    switch (ch) {
+    case KEY_UP:
+      dutyCycle = min(1.0, dutyCycle + dutyTick(dutyCycle));
+      break;
+    case KEY_DOWN:
+      dutyCycle = max(0.0, dutyCycle - dutyTick(dutyCycle));
+      break;
+    case KEY_LEFT:
+      freqMHz -= freqTick(freqMHz);
+      break;
+    case KEY_RIGHT:
+      freqMHz += freqTick(freqMHz);
+      break;
+    default:
+      printw(help);
+      break;
+    }
+  } while (ch != int(EXIT_CHAR));
+  endwin();/* End curses mode  */
+  return 0;
 }
