@@ -380,8 +380,6 @@ namespace peripherals {
 
       unsigned clockConfig =
 	cmPwd((unsigned)mash | (unsigned)CM_MODE::ENAB | (unsigned)clockSource);
-      LOG_DEBUG << "should be : " << HEX_STREAM(((unsigned)mash | (unsigned)CM_MODE::ENAB | (unsigned)clockSource));
-      LOG_DEBUG << "clockConfig: " << HEX_STREAM(clockConfig);
       ACCESS(peripheralsBase_, ctlRegister) = clockConfig;
     }
 

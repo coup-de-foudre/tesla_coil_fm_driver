@@ -1,31 +1,28 @@
 /*
   Copyright (c) 2018, Michael McCoy
 */
-#include <csignal>
-#include <plog/Log.h>
-#include <plog/Appenders/ColorConsoleAppender.h>
-#include "peripherals.h"
-#include <iostream>
-#include <cmath>
+#include "pwm.h"
+
 #include <ncurses.h>
 
-using namespace peripherals;
+#include <csignal>
+#include <cmath>
+
+#include <algorithm>
+#include <iostream>
+
+#include "plog/Log.h"
+#include "plog/Appenders/ColorConsoleAppender.h"
 
 
-double max(double a, double b) {
-  return a > b ? a : b;
-}
-
-double min(double a, double b) {
-  return a < b ? a : b;
-}
+using namespace pwm;
 
 
 /**
  * Frequency tick for a given frequency
  */
 double freqTick(double freqMHz) {
-  return pow(10.0, int(log10(freqMHz)) - 2.0);
+  return pow(10.0, int(log10(freqMHz / 2.0)) - 2.0);
 }
 
 
@@ -41,14 +38,14 @@ double dutyTick(double dutyCycle) {
  * Significant figures needed for frequency
  */
 int sigFig(double freqMHz) {
-  return round(max(4.0 - log10(freqMHz), 0.));
+  return round(std::max(4.0 - log10(freqMHz), 0.));
 }
 
 
 void clearLine(int offset = 0) {
     int x,y;
     getyx(stdscr, y, x);
-    move(y + offset,0);
+    move(y + offset, 0);
     clrtoeol();
 }
 
@@ -71,6 +68,8 @@ int main(int argc, char** argv) {
   double freqMHz = 100.0;
   double dutyCycle = 0.5;
 
+  PwmController pwmController(freqMHz, dutyCycle);
+
   constexpr char EXIT_CHAR = 'x';
   static const char help[] =
     "Use left/right to change frequency, up/down to change duty cycle, 'x' to quit.\n";
@@ -87,15 +86,26 @@ int main(int argc, char** argv) {
   printw(help);
 
   do {
-    clearLine();
-    printw("%%%.1f duty @ %.*fMHz", 100.0*dutyCycle, sigFig(freqMHz), freqMHz);
+    pwmController.setTargetFreqMHz(freqMHz);
+    pwmController.setTargetDutyCycle(dutyCycle);
+
+    double actualFreqMHz = pwmController.getHardwareFreqMHz();
+    double actualDutyCycle = pwmController.getHardwareDutyCycle();
+
+    clearLine(-1);
+    clearLine(-1);
+    printw("ACTUAL: %%%.1f duty @ %.*fMHz\n",
+	   100.0*actualDutyCycle, sigFig(actualFreqMHz), actualFreqMHz);
+    printw("TARGET: %%%.1f duty @ %.*fMHz\n",
+	   100.0*dutyCycle, sigFig(freqMHz), freqMHz);
+
     ch = getch();
     switch (ch) {
     case KEY_UP:
-      dutyCycle = min(1.0, dutyCycle + dutyTick(dutyCycle));
+      dutyCycle = std::min(1.0, dutyCycle + dutyTick(dutyCycle));
       break;
     case KEY_DOWN:
-      dutyCycle = max(0.0, dutyCycle - dutyTick(dutyCycle));
+      dutyCycle = std::max(0.0, dutyCycle - dutyTick(dutyCycle));
       break;
     case KEY_LEFT:
       freqMHz -= freqTick(freqMHz);

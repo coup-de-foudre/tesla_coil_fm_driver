@@ -4,35 +4,34 @@
 
   All rights reserved.
 
+  // TODO: Apply license
  */
 #ifndef PWM_BCM2837_H
 #define PWM_BCM2837_H
 
-#include <plog/Log.h>
 #include "peripherals.h"
 
+#include <algorithm>
 
-namepsace pwm {
+#include "plog/Log.h"
 
-  enum class BCM_PIN : unsigned {
-    PIN12 = 12,
-    PIN13 = 13,
-    PIN18 = 18,
-    PIN19 = 19,
-  };
+
+namespace pwm {
+  using namespace peripherals;
 
   class PwmController {
 
   public:
 
     PwmController(double freqMHz,
-		  double dutyCycle = 0.5,
-		  PWM_CHANNEL channel = PWM_CHANNEL::CH1)  {
+                  double dutyCycle = 0.5,
+                  PWM_CHANNEL channel = PWM_CHANNEL::CH1): p(Peripherals::getInstance())  {
 
       // TODO: Mode choice
       // TODO: Lock per-pin for thread-safety?
 
-      p = peripherals::Peripherals::getInstance();
+      //p = Peripherals::getInstance();
+
       cmRegister = CM_CTL::PWM;
       mash = CM_MASH::MASH0;
       clockSource = CM_SRC::PLLD;
@@ -40,13 +39,20 @@ namepsace pwm {
       clockDivisor.divI = 2;  // Apparently a minumum of 2 is required
       clockDivisor.divF = 0;
       pwmChannel = channel;
+      baseFreqMHz = clockFreqMHz / (clockDivisor.divI + clockDivisor.divF/(4096.0));
 
       std::vector<PWM_CTL> pwmModes = {
-	PWM_CTL::MSEN1,  // Enable M/S transmittion
-	PWM_CTL::PWEN1,  // Enable channel 1 (which maps to PWM0?)
-	PWM_CTL::MSEN2,  // Enable M/S transmittion
-	PWM_CTL::PWEN2,  // Enable channel 2 (which maps to PWM1?)
+        PWM_CTL::MSEN1,  // Enable M/S transmittion
+        PWM_CTL::PWEN1,  // Enable channel 1 (which maps to PWM0?)
+        PWM_CTL::MSEN2,  // Enable M/S transmittion
+        PWM_CTL::PWEN2,  // Enable channel 2 (which maps to PWM1?)
       };
+
+      if (pwmChannel == PWM_CHANNEL::CH1) {
+        p.gpioFunctionSelect(FSEL::FSEL12, FSEL_MODE::ALT0);
+      } else {
+        p.gpioFunctionSelect(FSEL::FSEL13, FSEL_MODE::ALT0);
+      }
 
       LOG_DEBUG << "Setting up PWM with parameters";
       LOG_DEBUG << "cmRegister: " <<  HEX_STREAM(cmRegister);
@@ -54,12 +60,7 @@ namepsace pwm {
       LOG_DEBUG << "clockDivisor: " << clockDivisor.divI << "(I) " << clockDivisor.divF << "(F)";
       LOG_DEBUG << "mash: " << HEX_STREAM(mash);
       LOG_DEBUG << "pwmChannel: " << HEX_STREAM(pwmChannel);
-
-      if (pwmChannel == PWM_CHANNEL::CH1) {
-	p.gpioFunctionSelect(FSEL::FSEL12, FSEL_MODE::ALT0);
-      } else {
-	p.gpioFunctionSelect(FSEL::FSEL13, FSEL_MODE::ALT0);
-      }
+      LOG_DEBUG << "baseFreqMHz: " << baseFreqMHz;
 
       p.pwmCtlSet(pwmModes);
       setTargetFreqMHz(freqMHz);
@@ -67,7 +68,7 @@ namepsace pwm {
     }
 
     ~PwmController() {
-      LOG_DEBUG << "Shutting down";
+      LOG_DEBUG << "Shutting PWM down.";
       shutdown();
     }
 
@@ -79,18 +80,11 @@ namepsace pwm {
      * hardware is currently set to.
      *
      */
-    void setTargetFreqMHz(double freqMHz) {
+    inline void setTargetFreqMHz(double freqMHz) {
       targetFreqMHz = freqMHz;
-
-      unsigned pwmPeriod = 2; // This is the period S
-      unsigned pwmDutyCycle = 1; // This is duty M
-
-      double baseFrequency = (clockDivisor.divI + clockDivisor.divF/(4096.0));
-
-      pwmPeriod = (unsigned) max(2.0, freqMHz / baseFrequency);
+      pwmPeriod = (unsigned) std::max(2.0, std::round(baseFreqMHz / freqMHz));
+      LOG_DEBUG << "Setting period " << pwmPeriod;
       p.pwmRangeSet(pwmChannel, pwmPeriod);
-
-      // Upon changing frequency, need to coordinate the duty cycle
       setTargetDutyCycle(targetDutyCycle);
     }
 
@@ -101,14 +95,17 @@ namepsace pwm {
      * hardware. Use `getHardwareFreqMHz` to get the frequency the
      * hardware is currently set to.
      */
-    double getTargetFreqMHz() {
+    inline double getTargetFreqMHz() {
       return targetFreqMHz;
     }
 
     /**
      * Get the current hardware frequency
      */
-    double getHardwareFreqMHz();
+    inline double getHardwareFreqMHz() {
+      // TODO: Read from hardware register
+      return baseFreqMHz / pwmPeriod;
+    }
 
     /**
      * Set the duty cycle (between 0.0 and 1.0)
@@ -117,9 +114,10 @@ namepsace pwm {
      * hardware. Use `getHardwareDutyCycle` to get the duty cycle
      * directly from the hardware.
      */
-    void setTargetDutyCycle(double dutyCycle) {
+    inline void setTargetDutyCycle(double dutyCycle) {
       targetDutyCycle = dutyCycle;
       pwmDutyCycle = round(targetDutyCycle * pwmPeriod);
+      LOG_DEBUG << "Setting duty cycle " << pwmDutyCycle;
       p.pwmDataSet(pwmChannel, pwmDutyCycle);
     }
 
@@ -130,14 +128,17 @@ namepsace pwm {
      * hardware. Use `getHardwareDutyCycle` to get the duty cycle
      * directly from the hardware.
      */
-    double getTargetDutyCycle() {
+    inline double getTargetDutyCycle() {
       return targetDutyCycle;
     }
 
     /**
      * Get the current hardware duty cycle
      */
-    double getHardwareDutyCycle();
+    inline double getHardwareDutyCycle() {
+      // TODO: Read from hardware register
+      return ((double)pwmDutyCycle) / pwmPeriod;
+    }
 
     /**
      * Shut down the PWM
@@ -148,28 +149,22 @@ namepsace pwm {
 
   private:
 
-    peripherals::Peripherals& p;
+    Peripherals& p;
     double targetFreqMHz;
     double targetDutyCycle;
+    PWM_CHANNEL pwmChannel;
 
     CM_CTL cmRegister;
     CM_MASH mash;
-    PWM_CHANNEL channel;
     CM_SRC clockSource;
     float clockFreqMHz;
     CLOCK_DIV clockDivisor;
-    FSEL bcmPin;
+    double baseFreqMHz;
 
     unsigned pwmPeriod;
     unsigned pwmDutyCycle;
 
-    std::vector<PWM_CTL> pwmModes = {
-      PWM_CTL::MSEN1,  // Enable M/S transmittion
-      PWM_CTL::PWEN1,  // Enable channel 1 (which maps to PWM0?)
-      PWM_CTL::MSEN2,  // Enable M/S transmittion
-      PWM_CTL::PWEN2,   // Enable channel 2 (which maps to PWM1?)
-    };
-
+    std::vector<PWM_CTL> pwmModes;
   };
 
 } // namespace pwm
