@@ -56,7 +56,7 @@ volatile bool Transmitter::doStop_ = false;
 
 std::mutex Transmitter::transmitMutex_;
 
-unsigned Transmitter::clockOffsetAddr_ = CM_GP0CTL;
+unsigned Transmitter::clockOffsetAddr_ = (unsigned)CM_CTL::GP0;
 AbstractReader* Transmitter::reader_ = NULL;
 
 peripherals::Peripherals& Transmitter::peripherals_ = peripherals::Peripherals::getInstance();
@@ -114,7 +114,7 @@ unsigned Transmitter::clkSlew(float finalFreqMHz,
 	    << ", startFreqMHz=" << startFreqMHz
 	    << ", slewTimeMicroseconds=" << (double)slewTimeMicroseconds;
 
-  volatile unsigned long long startMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+  volatile unsigned long long startMicroseconds = ACCESS64(mmapPeripherals_, ST_REGISTER::CLO);
   volatile unsigned long long currentMicroseconds = startMicroseconds;
 
   while (true) {
@@ -122,7 +122,7 @@ unsigned Transmitter::clkSlew(float finalFreqMHz,
       break;
     }
     usleep(updateDelayMicroseconds_);
-    currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+    currentMicroseconds = ACCESS64(mmapPeripherals_, ST_REGISTER::CLO);
     float targetFreqMHz = startFreqMHz +
       ((double)(currentMicroseconds - startMicroseconds) / (double)(slewTimeMicroseconds)) *
       (finalFreqMHz - startFreqMHz);
@@ -152,7 +152,8 @@ unsigned Transmitter::clkShutdownHard(bool lock=true) {
   }
   // Disable clock and wait for it to become available
   unsigned cmCtlInitialState = ACCESS(mmapPeripherals_, clockOffsetAddr_);
-  ACCESS(mmapPeripherals_, clockOffsetAddr_) = (cmCtlInitialState & 0x00FFFFEF) | CM_PASSWD;
+  ACCESS(mmapPeripherals_, clockOffsetAddr_) =
+    (cmCtlInitialState & 0x00FFFFEF) | (unsigned)CM_MODE::PASSWD;
   while (true) {
     volatile bool enabledOrBusy =
       ACCESS(mmapPeripherals_, clockOffsetAddr_) & (0x01 << 4 | 0x01 << 7);
@@ -164,7 +165,7 @@ unsigned Transmitter::clkShutdownHard(bool lock=true) {
   }
 
   // Reset clock divisor to 1
-  ACCESS(mmapPeripherals_, CM_GP0DIV) = CM_PASSWD | 0x00000001;
+  ACCESS(mmapPeripherals_, CM_DIV::GP0DIV) = (unsigned) CM_MODE::PASSWD | 0x00000001;
   transmitMutex_.unlock();
   return cmCtlInitialState;
 }
@@ -189,12 +190,13 @@ unsigned Transmitter::clkInitHard(float freqMHz, bool lock=true) {
   unsigned clkDivisor = clkDivisorSet(freqMHz);
 
   // Set GPIO pin 4 alternate function 1 (GPCLK0)
-  ACCESS(mmapPeripherals_, GPFSEL0) =
-    (ACCESS(mmapPeripherals_, GPFSEL0) & 0xFFFF8FFF) | (0x01 << 14);
+  ACCESS(mmapPeripherals_, (unsigned) GP_REGISTER::GPFSEL0) =
+    (ACCESS(mmapPeripherals_, (unsigned) GP_REGISTER::GPFSEL0) & 0xFFFF8FFF) | (0x01 << 14);
 
   // Set up the clock manager
-  ACCESS(mmapPeripherals_, CM_GP0CTL) =
-    CM_PASSWD | CM_MASH1 | CM_ENAB | CM_SRC_PLLD;
+  ACCESS(mmapPeripherals_, CM_CTL::GP0) =
+    (unsigned)CM_MODE::PASSWD | (unsigned)CM_MASH::MASH1 |
+    (unsigned)CM_MODE::ENAB | (unsigned)CM_SRC::PLLD;
 
   if (lock) {
     transmitMutex_.unlock();
@@ -246,7 +248,7 @@ unsigned Transmitter::clkInitSoft() {
  * Returns the new clock divisor.
  */
 inline unsigned Transmitter::clkDivisorSet(float targetFreqMHz) {
-  const float divisor = PLLD_FREQ_MHZ / targetFreqMHz;
+  const float divisor = CM_FREQ::PLLD_MHZ / targetFreqMHz;
   unsigned clockDivisor;
   if (divisor <= 0.0) {
     clockDivisor = 1;
@@ -255,7 +257,8 @@ inline unsigned Transmitter::clkDivisorSet(float targetFreqMHz) {
   } else {
     clockDivisor = (unsigned) (divisor * 4096.0 + 0.5);
   }
-  ACCESS(mmapPeripherals_, CM_GP0DIV) = CM_PASSWD | (0x00FFFFFF & clockDivisor);
+  ACCESS(mmapPeripherals_, CM_DIV::GP0DIV) =
+    (unsigned)CM_MODE::PASSWD | (0x00FFFFFF & clockDivisor);
   return clockDivisor;
 }
 
@@ -264,9 +267,9 @@ inline unsigned Transmitter::clkDivisorSet(float targetFreqMHz) {
  * Read the current transmission frequency from the peripheral bus
  */
 inline float Transmitter::getCurrentTransmitFrequencyMHz() {
-  volatile unsigned clockDivisor = 0x00FFFFFF & ACCESS(mmapPeripherals_, CM_GP0DIV);
+  volatile unsigned clockDivisor = 0x00FFFFFF & ACCESS(mmapPeripherals_, CM_DIV::GP0DIV);
   float divisor = ((float) clockDivisor) / 4096.0;
-  return PLLD_FREQ_MHZ / divisor;
+  return CM_FREQ::PLLD_MHZ / divisor;
 }
 
 /**
@@ -374,7 +377,7 @@ void Transmitter::transmit() {
   transmitMutex_.lock();
   LOG_DEBUG << "Lock acquired";
 
-  volatile unsigned long long startMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+  volatile unsigned long long startMicroseconds = ACCESS64(mmapPeripherals_, ST_REGISTER::CLO);
 
   unsigned numFrames = 0;
   bool firstLoop = true;
@@ -384,14 +387,14 @@ void Transmitter::transmit() {
     if (!reader_->getFrames(frames)) {
       // Underrun condition, restart as if at the beginning
       numFrames = 0;
-      startMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+      startMicroseconds = ACCESS64(mmapPeripherals_, ST_REGISTER::CLO);
       continue;
     }
 
     // Avoid overflow issues by resetting the frame number at 2^31
     if (numFrames >= unsigned(1 << 31)) {
       numFrames = 0;
-      startMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+      startMicroseconds = ACCESS64(mmapPeripherals_, ST_REGISTER::CLO);
       firstLoop = true;
     }
 
@@ -419,7 +422,7 @@ void Transmitter::transmit() {
       // Spin-wait for transmit time, shortcut for doStop_
       volatile unsigned long long currentMicroseconds;
       do {
-	currentMicroseconds = ACCESS64(mmapPeripherals_, ST_CLO);
+	currentMicroseconds = ACCESS64(mmapPeripherals_, ST_REGISTER::CLO);
       } while(
 	      !doStop_ &&
 	      ((currentMicroseconds - startMicroseconds) < nextFrameMicroseconds)
