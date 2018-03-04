@@ -56,32 +56,36 @@ int main(int argc, char** argv) {
   static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
   plog::init(plog::debug, &consoleAppender);
 
-  /*
-  // TODO:
-  // Add options for setting frequency, pin (12,13,18,19), and duty cycle
-  // Allow arrow keys to update frequency, duty cycle
-  LOG_DEBUG << "Starting test";
-  pwmTest(peripherals);
-  LOG_DEBUG << "Test finished";
-  */
-
+  constexpr char EXIT_CHAR = 'q';
   double freqMHz = 100.0;
   double dutyCycle = 0.5;
 
-  PwmController pwmController(freqMHz, dutyCycle);
+  bool showUsage = false;
+  for (int i = 1; i < argc; i++) {
+    if (std::string("-f") == argv[i]) {
+      freqMHz = std::atof(argv[i+1]);
+      i++;
+    } else {
+      showUsage = true;
+    }
+  }
+  if (showUsage) {
+    std::cout << "Usage: " << argv[0] << " [-f freqMHz=100.0]" << std::endl;
+    return 0;
+  }
 
-  constexpr char EXIT_CHAR = 'x';
   static const char help[] =
-    "Use left/right to change frequency, up/down to change duty cycle, 'x' to quit.\n";
+    "Use left/right to change frequency, up/down to change duty cycle, 'q' to quit.\n";
 
+  PwmController pwmController(freqMHz, dutyCycle);
   int ch = int(EXIT_CHAR);
 
   setlocale(LC_ALL, "");
 
-  initscr();/* Start curses mode */
-  raw();/* Line buffering disabled*/
-  keypad(stdscr, TRUE);/* Get arrows, shifts, etc..*/
-  noecho();/* Don't echo() while we do getch */
+  initscr(); // Start curses mode
+  raw();  // Line buffering disabled
+  keypad(stdscr, TRUE);  // Get arrows, shifts, etc..
+  noecho();  // Don't echo() while we do getch
 
   printw(help);
 
@@ -92,8 +96,6 @@ int main(int argc, char** argv) {
     double actualFreqMHz = pwmController.getHardwareFreqMHz();
     double actualDutyCycle = pwmController.getHardwareDutyCycle();
 
-    clearLine(-1);
-    clearLine(-1);
     printw("ACTUAL: %%%.1f duty @ %.*fMHz\n",
 	   100.0*actualDutyCycle, sigFig(actualFreqMHz), actualFreqMHz);
     printw("TARGET: %%%.1f duty @ %.*fMHz\n",
@@ -114,9 +116,10 @@ int main(int argc, char** argv) {
       freqMHz += freqTick(freqMHz);
       break;
     default:
-      printw(help);
       break;
     }
+    clearLine(-1);
+    clearLine(-1);
   } while (ch != int(EXIT_CHAR));
   endwin();/* End curses mode  */
   return 0;

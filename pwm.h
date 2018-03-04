@@ -30,13 +30,20 @@ namespace pwm {
       // TODO: Mode choice
       // TODO: Lock per-pin for thread-safety?
 
-      //p = Peripherals::getInstance();
-
       cmRegister = CM_CTL::PWM;
+
+      // Fractional part of clock divisor ignored with MASH0
       mash = CM_MASH::MASH0;
+
       clockSource = CM_SRC::PLLD;
       clockFreqMHz = CM_FREQ::PLLD_MHZ;
-      clockDivisor.divI = 2;  // Apparently a minumum of 2 is required
+
+      // Set clock divisor to give about 2048 different PWM "clock periods" (S)
+      // This is defensive: some online references suggest that S is a 12-bit
+      // number, despite being a 32-bit register.
+
+      // TODO: Check that this works with a scope.
+      clockDivisor.divI = (unsigned)std::max(2.0, clockFreqMHz / freqMHz / 2048.0) ;
       clockDivisor.divF = 0;
       pwmChannel = channel;
       baseFreqMHz = clockFreqMHz / (clockDivisor.divI + clockDivisor.divF/(4096.0));
@@ -83,7 +90,6 @@ namespace pwm {
     inline void setTargetFreqMHz(double freqMHz) {
       targetFreqMHz = freqMHz;
       pwmPeriod = (unsigned) std::max(2.0, std::round(baseFreqMHz / freqMHz));
-      LOG_DEBUG << "Setting period " << pwmPeriod;
       p.pwmRangeSet(pwmChannel, pwmPeriod);
       setTargetDutyCycle(targetDutyCycle);
     }
@@ -117,7 +123,6 @@ namespace pwm {
     inline void setTargetDutyCycle(double dutyCycle) {
       targetDutyCycle = dutyCycle;
       pwmDutyCycle = round(targetDutyCycle * pwmPeriod);
-      LOG_DEBUG << "Setting duty cycle " << pwmDutyCycle;
       p.pwmDataSet(pwmChannel, pwmDutyCycle);
     }
 
