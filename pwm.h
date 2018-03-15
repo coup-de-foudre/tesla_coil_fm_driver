@@ -55,11 +55,19 @@ namespace pwm {
         PWM_CTL::PWEN2,  // Enable channel 2 (which maps to PWM1?)
       };
 
+      // PATCH: Enable more PWM pins
+      p.gpioFunctionSelect(FSEL::FSEL12, FSEL_MODE::ALT0);
+      p.gpioFunctionSelect(FSEL::FSEL13, FSEL_MODE::ALT0);
+      p.gpioFunctionSelect(FSEL::FSEL18, FSEL_MODE::ALT5);
+      p.gpioFunctionSelect(FSEL::FSEL19, FSEL_MODE::ALT5);
+
+      /*
       if (pwmChannel == PWM_CHANNEL::CH1) {
         p.gpioFunctionSelect(FSEL::FSEL12, FSEL_MODE::ALT0);
       } else {
         p.gpioFunctionSelect(FSEL::FSEL13, FSEL_MODE::ALT0);
-      }
+      } 
+      */
 
       LOG_DEBUG << "Setting up PWM with parameters";
       LOG_DEBUG << "cmRegister: " <<  HEX_STREAM(cmRegister);
