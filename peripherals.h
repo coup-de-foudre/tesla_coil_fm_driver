@@ -437,6 +437,14 @@ namespace peripherals {
     }
 
 
+    inline void clearPwmStatus() {
+      ACCESS(peripheralsBase_, PWM_REGISTER::STA) = 0x0000FFFF;
+    }
+
+    inline unsigned getPwmStatus() {
+      return ACCESS(peripheralsBase_, PWM_REGISTER::STA);
+    }
+
     // Deleting these helps ensure singletons
     Peripherals(Peripherals const&) = delete;
     void operator=(Peripherals const&) = delete;

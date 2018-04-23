@@ -12,6 +12,7 @@
 #include "peripherals.h"
 
 #include <algorithm>
+#include <unistd.h>
 
 #include "plog/Log.h"
 
@@ -55,18 +56,12 @@ namespace pwm {
         PWM_CTL::PWEN2,  // Enable channel 2 (which maps to PWM1?)
       };
 
-      // PATCH: Enable more PWM pins
-      p.gpioFunctionSelect(FSEL::FSEL12, FSEL_MODE::ALT0);
-      p.gpioFunctionSelect(FSEL::FSEL13, FSEL_MODE::ALT0);
-      p.gpioFunctionSelect(FSEL::FSEL18, FSEL_MODE::ALT5);
-      p.gpioFunctionSelect(FSEL::FSEL19, FSEL_MODE::ALT5);
-
       /*
       if (pwmChannel == PWM_CHANNEL::CH1) {
         p.gpioFunctionSelect(FSEL::FSEL12, FSEL_MODE::ALT0);
       } else {
         p.gpioFunctionSelect(FSEL::FSEL13, FSEL_MODE::ALT0);
-      } 
+      }
       */
 
       LOG_DEBUG << "Setting up PWM with parameters";
@@ -77,9 +72,29 @@ namespace pwm {
       LOG_DEBUG << "pwmChannel: " << HEX_STREAM(pwmChannel);
       LOG_DEBUG << "baseFreqMHz: " << baseFreqMHz;
 
-      p.pwmCtlSet(pwmModes);
-      setTargetFreqMHz(freqMHz);
+      LOG_DEBUG << "Initial Status: " << HEX_STREAM(p.getPwmStatus());
+
+      p.pwmCtlSet({});
+
+      // PATCH: Enable more PWM pins
+      p.gpioFunctionSelect(FSEL::FSEL12, FSEL_MODE::ALT0);
+      p.gpioFunctionSelect(FSEL::FSEL13, FSEL_MODE::ALT0);
+      p.gpioFunctionSelect(FSEL::FSEL18, FSEL_MODE::ALT5);
+      p.gpioFunctionSelect(FSEL::FSEL19, FSEL_MODE::ALT5);
+
+
+      p.clearPwmStatus();
+
       p.clockInit(cmRegister, clockDivisor, mash, clockSource);
+
+      setTargetFreqMHz(freqMHz);
+      usleep(10);
+
+      p.pwmCtlSet(pwmModes);
+      usleep(10);
+
+      LOG_DEBUG << "Post-setup Status: " << HEX_STREAM(p.getPwmStatus());
+
     }
 
     ~PwmController() {
@@ -157,7 +172,9 @@ namespace pwm {
      * Shut down the PWM
      */
     void shutdown() {
+      p.pwmCtlSet({});
       p.clockShutdown(cmRegister);
+      p.clearPwmStatus();
     }
 
   private:
